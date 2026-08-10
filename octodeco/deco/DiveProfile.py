@@ -22,6 +22,7 @@ import pandas as pd
 import pytz
 
 from . import Buhlmann, Cylinder, DiveProfileSer, Gas
+from .DecompressionModel import DecompressionModel, model_class
 from .DivePoint import DivePoint
 
 
@@ -48,14 +49,15 @@ class DiveProfile:
         self._cylinders_used: dict[Gas.Gas, Cylinder.Cylinder] | None = None
         self._deco_stops_computation_time = 0.0
         self._full_info_computation_time = 0.0
-        # Two sets of deco model info are kept: 'display' follows the user's
-        # current GF settings, 'profile' matches the stops actually in the profile.
+        # Which decompression model this dive uses (a registry name, see
+        # DecompressionModel), plus two sets of model settings: 'display'
+        # follows the user's current settings, 'profile' matches the stops
+        # actually in the profile.
+        self._deco_model_type: str = Buhlmann.Buhlmann.MODEL_TYPE
         self._desc_deco_model_display = ''
-        self.gf_low_display = gf_low
-        self.gf_high_display = gf_high
+        self._model_settings_display: dict[str, Any] = {'gf_low': gf_low, 'gf_high': gf_high}
         self._desc_deco_model_profile = ''
-        self.gf_low_profile = gf_low
-        self.gf_high_profile = gf_high
+        self._model_settings_profile: dict[str, Any] = {'gf_low': gf_low, 'gf_high': gf_high}
         self.created = datetime.datetime.now(tz=pytz.timezone('Europe/Amsterdam'))
         self.add_custom_desc: str | None = None
         self.custom_desc: str | None = None
@@ -66,7 +68,44 @@ class DiveProfile:
 
         # NOTE - If you add attributes here, also add migration code to DiveProfileSer
         #
-        self.update_deco_model_info(self.deco_model(gf_low, gf_high), update_display=True)
+        self.update_deco_model_info(self.deco_model(), update_display=True)
+
+    #
+    # Bühlmann gradient factors. Kept as attributes for compatibility (flaskr
+    # and the CSV format read and write them); they live in the model
+    # settings dicts, and are None for models without gradient factors.
+    #
+    @property
+    def gf_low_display(self) -> float | None:
+        return self._model_settings_display.get('gf_low')
+
+    @gf_low_display.setter
+    def gf_low_display(self, value: float) -> None:
+        self._model_settings_display['gf_low'] = value
+
+    @property
+    def gf_high_display(self) -> float | None:
+        return self._model_settings_display.get('gf_high')
+
+    @gf_high_display.setter
+    def gf_high_display(self, value: float) -> None:
+        self._model_settings_display['gf_high'] = value
+
+    @property
+    def gf_low_profile(self) -> float | None:
+        return self._model_settings_profile.get('gf_low')
+
+    @gf_low_profile.setter
+    def gf_low_profile(self, value: float) -> None:
+        self._model_settings_profile['gf_low'] = value
+
+    @property
+    def gf_high_profile(self) -> float | None:
+        return self._model_settings_profile.get('gf_high')
+
+    @gf_high_profile.setter
+    def gf_high_profile(self, value: float) -> None:
+        self._model_settings_profile['gf_high'] = value
 
     def points(self) -> list[DivePoint]:
         return self._points
@@ -91,15 +130,12 @@ class DiveProfile:
                              for p in self._points],
                             columns=DivePoint.dataframe_columns())
 
-    def deco_model(self, gf_low: float | None = None,
-                   gf_high: float | None = None) -> Buhlmann.Buhlmann:
-        """A Buhlmann model for this dive's settings (display GFs by default)."""
-        gf_low = gf_low if gf_low is not None else self.gf_low_display
-        gf_high = gf_high if gf_high is not None else self.gf_high_display
-        return Buhlmann.Buhlmann(gf_low, gf_high,
-                                 self._descent_speed, self._ascent_speed,
-                                 self._max_pO2_deco, self._gas_switch_mins,
-                                 self._last_stop_depth)
+    def deco_model(self, settings: dict[str, Any] | None = None) -> DecompressionModel:
+        """Construct this dive's decompression model, with the current
+        display settings unless specific settings are given."""
+        if settings is None:
+            settings = self._model_settings_display
+        return model_class(self._deco_model_type).for_profile(self, settings)
 
     #
     # Dive / deco model info
@@ -149,17 +185,15 @@ class DiveProfile:
             r = f'{self.add_custom_desc}: {r}'
         return r
 
-    def update_deco_model_info(self, deco_model: Buhlmann.Buhlmann,
+    def update_deco_model_info(self, deco_model: DecompressionModel,
                                update_display: bool = False,
                                update_profile: bool = False) -> None:
         if update_display:
             self._desc_deco_model_display = deco_model.description()
-            self.gf_low_display = deco_model.gf_low
-            self.gf_high_display = deco_model.gf_high
+            self._model_settings_display = deco_model.settings()
         if update_profile:
             self._desc_deco_model_profile = deco_model.description()
-            self.gf_low_profile = deco_model.gf_low
-            self.gf_high_profile = deco_model.gf_high
+            self._model_settings_profile = deco_model.settings()
 
     #
     # Modifying the profile (adding sections etc)

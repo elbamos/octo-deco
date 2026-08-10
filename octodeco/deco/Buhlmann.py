@@ -18,6 +18,7 @@ from .Util import Stop
 if TYPE_CHECKING:
     from . import TissueStateCython
     from .DivePoint import DivePoint
+    from .DiveProfile import DiveProfile
 
 
 class AmbientToGF:
@@ -42,6 +43,8 @@ class AmbientToGF:
 
 class Buhlmann(DecompressionModel):
     """All essential logic for the Bühlmann deco model."""
+
+    MODEL_TYPE = 'Buhlmann'
 
     def __init__(self,
                  gf_low: float, gf_high: float,
@@ -69,6 +72,17 @@ class Buhlmann(DecompressionModel):
     # (DivePoint, state) arguments to Bühlmann-specific ones (tissue state,
     # gradient factor line) and delegate to the internal implementations.
     #
+    @classmethod
+    def for_profile(cls, diveprofile: DiveProfile,
+                    settings: dict[str, Any]) -> Buhlmann:
+        return cls(settings['gf_low'], settings['gf_high'],
+                   diveprofile._descent_speed, diveprofile._ascent_speed,
+                   diveprofile._max_pO2_deco, diveprofile._gas_switch_mins,
+                   diveprofile._last_stop_depth)
+
+    def settings(self) -> dict[str, Any]:
+        return {'gf_low': self.gf_low, 'gf_high': self.gf_high}
+
     def description(self) -> str:
         return f'ZHL-16C GF {self.gf_low}/{self.gf_high}'
 

@@ -36,14 +36,34 @@ from .Util import Stop
 
 if TYPE_CHECKING:
     from .DivePoint import DivePoint
+    from .DiveProfile import DiveProfile
     from .Gas import Gas
+
+# Registry of concrete model types by their MODEL_TYPE name. DiveProfile
+# stores the name (not the class) so that pickled dives survive refactors;
+# subclasses register themselves automatically via __init_subclass__.
+_MODEL_TYPES: dict[str, type[DecompressionModel]] = {}
+
+
+def model_class(model_type: str) -> type[DecompressionModel]:
+    """Look up a registered model class by its MODEL_TYPE name."""
+    return _MODEL_TYPES[model_type]
 
 
 class DecompressionModel(ABC):
+    # Name under which the model is registered; None for abstract/helper
+    # subclasses that should not be constructible from a profile.
+    MODEL_TYPE: str | None = None
+
     # Tissue compartment configuration, shared by all models. See
     # TissueStateCython: only one set of constants is supported per run.
     TISSUE_CONSTANTS = BuhlmannConstants.ZHL_16C_1a
     RQ = 0.9  # Respiratory quotient
+
+    def __init_subclass__(cls, **kwargs: Any):
+        super().__init_subclass__(**kwargs)
+        if cls.MODEL_TYPE is not None:
+            _MODEL_TYPES[cls.MODEL_TYPE] = cls
 
     def __init__(self):
         self._constants = self.TISSUE_CONSTANTS
@@ -82,6 +102,20 @@ class DecompressionModel(ABC):
     #
     # The model-specific interface
     #
+    @classmethod
+    @abstractmethod
+    def for_profile(cls, diveprofile: DiveProfile,
+                    settings: dict[str, Any]) -> DecompressionModel:
+        """Construct the model for a dive: its own configuration comes from
+        `settings` (the dict shape settings() returns), dive-level parameters
+        (speeds, max deco pO2, last stop depth, ...) from the profile."""
+
+    @abstractmethod
+    def settings(self) -> dict[str, Any]:
+        """The model's own configuration as a plain dict, eg
+        {'gf_low': 35, 'gf_high': 70}. Must round-trip through
+        for_profile()."""
+
     @abstractmethod
     def description(self) -> str:
         """Human-readable description of the model and its settings."""

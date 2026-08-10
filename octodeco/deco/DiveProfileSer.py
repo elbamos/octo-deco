@@ -16,7 +16,7 @@ import pytz
 if TYPE_CHECKING:
     from .DiveProfile import DiveProfile
 
-CURRENT_VERSION = 17
+CURRENT_VERSION = 18
 
 
 #
@@ -67,6 +67,24 @@ def _migrate_up_to_current(from_version: int, diveprofile: DiveProfile) -> None:
     # v8
     if hasattr(diveprofile, '_deco_model'):
         diveprofile._deco_model = None
+
+    # v18: the deco model became pluggable. Profiles now store a model type
+    # plus generic settings dicts; the Bühlmann GFs move into those dicts.
+    # The old gf_* attributes are properties now, shadowing any pickled
+    # instance attributes, so read/remove those directly via __dict__.
+    d = diveprofile.__dict__
+    if '_deco_model_type' not in d:
+        diveprofile._deco_model_type = 'Buhlmann'
+    if '_model_settings_display' not in d:
+        diveprofile._model_settings_display = {
+            'gf_low': d.pop('gf_low_display', 35),
+            'gf_high': d.pop('gf_high_display', 70),
+        }
+    if '_model_settings_profile' not in d:
+        diveprofile._model_settings_profile = {
+            'gf_low': d.pop('gf_low_profile', 35),
+            'gf_high': d.pop('gf_high_profile', 70),
+        }
 
     # Note that we upgraded
     dive_id = getattr(diveprofile, 'dive_id', None)
