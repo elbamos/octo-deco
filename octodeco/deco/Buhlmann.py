@@ -11,11 +11,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
-from . import BuhlmannConstants, Gas, TissueStateCython, Util
+from . import Gas, Util
 from .DecompressionModel import DecompressionModel
 from .Util import Stop
 
 if TYPE_CHECKING:
+    from . import TissueStateCython
     from .DivePoint import DivePoint
 
 
@@ -47,10 +48,7 @@ class Buhlmann(DecompressionModel):
                  descent_speed: float, ascent_speed: float,
                  max_pO2_deco: float, gas_switch_mins: float,
                  last_stop_depth: float):
-        self._constants = BuhlmannConstants.ZHL_16C_1a
-        self._rq = 0.9  # Respiratory quotient
-        self._n_tissues = self._constants.N_TISSUES
-        self.TissueState = TissueStateCython.TissueState
+        super().__init__()
         self.gf_low = gf_low
         self.gf_high = gf_high
         self.max_pO2_deco = max_pO2_deco
@@ -73,10 +71,6 @@ class Buhlmann(DecompressionModel):
     #
     def description(self) -> str:
         return f'ZHL-16C GF {self.gf_low}/{self.gf_high}'
-
-    def cleared_tissue_state(self) -> TissueStateCython.TissueState:
-        """A tissue state fully saturated at surface pressure on air."""
-        return self.TissueState(self._constants, self._rq)
 
     def NDL(self, point: DivePoint, state: Any = None) -> float:
         amb_to_gf = self._get_ambtogf(point.tissue_state, point.p_amb,
@@ -295,20 +289,7 @@ class Buhlmann(DecompressionModel):
         """All decompression info for one point in a dive: ceilings, gradient
         factors, stops, time to surface, and no-decompression limit."""
         p_amb = Util.depth_to_Pamb(depth)
-        p_ceiling_99 = tissue_state.p_ceiling_for_gf_now(99.0)
-        # GF99: how do compartment pressure, ambient pressure, tolerance compare.
-        # The % makes most sense if ambient pressure is between compartment
-        # pressure and tolerance; if ambient pressure is bigger than
-        # compartment pressure: on-gassing.
-        gf99s, gf99, leading_tissue_i = tissue_state.GF99_all_info(p_amb)
-        surfacegf = tissue_state.GF99(Util.SURFACE_PRESSURE)
-        result: dict[str, Any] = {
-            'Ceil99': Util.Pamb_to_depth(p_ceiling_99),
-            'GF99': round(gf99, 1),
-            'SurfaceGF': round(surfacegf, 1),
-            'LeadingTissueIndex': leading_tissue_i,
-            'allGF99s': gf99s,
-        }
+        result = self.tissue_state_info(tissue_state, p_amb)
 
         # Below is about computing the decompression profile
         stops, p_ceiling, amb_to_gf = self._compute_deco_profile(
