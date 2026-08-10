@@ -161,6 +161,42 @@ class DiveProfile:
     def divetime(self) -> float:
         return sum(p.duration_diving_only() for p in self._points)
 
+    def _points_before_deco(self) -> list[DivePoint]:
+        """The points up to (not including) the first deco stop."""
+        result = []
+        for p in self._points:
+            if p.is_deco_stop:
+                break
+            result.append(p)
+        return result
+
+    def bottomtime(self) -> float:
+        """Bottom time in minutes: diving time up to (not including) the
+        first point marked as a deco stop. Surface time does not count.
+
+        In profiles built by add_stops, the transit to the first stop is
+        itself marked as a deco stop, so bottom time ends at the moment of
+        leaving the bottom. In multilevel dives where deco occurs between
+        levels, only the time before the *first* stop counts.
+        """
+        return sum(p.duration_diving_only() for p in self._points_before_deco())
+
+    def avg_depth_bottom(self) -> float:
+        """Time-weighted average depth (m) up to (not including) the first
+        deco stop; 0.0 if there is no such diving time.
+
+        Depth changes linearly between points, so each segment contributes
+        the mean of its endpoint depths, weighted by its duration.
+        """
+        weighted = 0.0
+        total = 0.0
+        for p in self._points_before_deco():
+            d = p.duration_diving_only()
+            if d > 0 and p.prev is not None:
+                weighted += d * (p.depth + p.prev.depth) / 2
+                total += d
+        return weighted / total if total > 0 else 0.0
+
     def cns_max(self) -> float:
         return max(p.cns_perc for p in self._points)
 
