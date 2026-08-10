@@ -111,6 +111,15 @@ class DivePoint:
             result.append(p)
         return result
 
+    def max_depth(self) -> float:
+        """The deepest depth (m) of the dive up to and including this point."""
+        result = 0.0
+        p: DivePoint | None = self
+        while p is not None:
+            result = max(result, p.depth)
+            p = p.prev
+        return result
+
     def bottomtime(self) -> float:
         """Bottom time in minutes as of this point: diving time up to (not
         including) the first point marked as a deco stop. Surface time does

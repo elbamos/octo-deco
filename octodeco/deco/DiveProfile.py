@@ -177,7 +177,7 @@ class DiveProfile:
         return max(p.cns_perc for p in self._points)
 
     def max_depth(self) -> float:
-        return max(p.depth for p in self._points)
+        return self._points[-1].max_depth()
 
     def integral_supersaturation_at_end(self) -> float:
         return self._points[-1].integral_supersat
