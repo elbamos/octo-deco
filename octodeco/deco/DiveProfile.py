@@ -230,15 +230,18 @@ class DiveProfile:
         new_time = self._points[-1].time + time_diff
         return self._append_point_abstime(new_time, new_depth, gas)
 
-    def _append_point_fix_ascent(self, op: DivePoint) -> tuple[DivePoint, bool]:
+    def _append_point_fix_ascent(self, op: DivePoint,
+                                 ascent_speed: float | None = None) -> tuple[DivePoint, bool]:
         """Append (a copy of) point op, preceded by an extra travel point if
-        its duration is too short to cover the ascent at ascent speed.
-        Returns the new point, and whether an extra point was added."""
+        its duration is too short to cover the ascent at ascent speed (the
+        dive's, unless overridden). Returns the new point, and whether an
+        extra point was added."""
+        speed = ascent_speed if ascent_speed is not None else self._ascent_speed
         have_point_added = False
-        time_needed = (self._points[-1].depth - op.depth) / self._ascent_speed
+        time_needed = (self._points[-1].depth - op.depth) / speed
         if time_needed > op.duration:
             transit_point_duration = time_needed - op.duration
-            transit_point_depth = self._points[-1].depth - self._ascent_speed * transit_point_duration
+            transit_point_depth = self._points[-1].depth - speed * transit_point_duration
             tp = self._append_point(transit_point_duration, transit_point_depth, self._points[-1].gas)
             tp.is_ascent_point = True
             have_point_added = True
@@ -247,14 +250,18 @@ class DiveProfile:
         return p, have_point_added
 
     def _append_transit(self, new_depth: float, gas: Gas.Gas,
-                        round_to_mins: bool = False) -> float:
+                        round_to_mins: bool = False,
+                        ascent_speed: float | None = None) -> float:
         """Append the travel to new_depth at ascent/descent speed; returns the
-        transit time in minutes."""
+        transit time in minutes. `ascent_speed` overrides the dive's ascent
+        speed for this one transit (descents are unaffected)."""
         current_depth = self._points[-1].depth
         depth_diff = current_depth - new_depth
-        transit_time = abs(depth_diff) / self._ascent_speed \
-            if depth_diff > 0 \
-            else abs(depth_diff) / self._descent_speed
+        if depth_diff > 0:
+            speed = ascent_speed if ascent_speed is not None else self._ascent_speed
+            transit_time = abs(depth_diff) / speed
+        else:
+            transit_time = abs(depth_diff) / self._descent_speed
         transit_time = math.ceil(transit_time) if round_to_mins else transit_time
         self._append_point(transit_time, new_depth, gas)
         return transit_time
@@ -262,15 +269,17 @@ class DiveProfile:
     # Relatively clever functions to modify
     def append_section(self, depth: float, duration: float,
                        gas: Gas.Gas | None = None, transit: bool = True,
-                       correct_duration_with_transit: bool = False) -> None:
+                       correct_duration_with_transit: bool = False,
+                       ascent_speed: float | None = None) -> None:
         """Append a section at `depth` for `duration` minutes, by default
-        preceded by the travel to get there."""
+        preceded by the travel to get there. `ascent_speed` overrides the
+        dive's ascent speed for that travel, if it is an ascent."""
         if gas is None:
             gas = Gas.Air() if depth == 0 else self._points[-1].gas
         if depth > 0:
             self.add_gas(gas)
         if transit:
-            transit_time = self._append_transit(depth, gas)
+            transit_time = self._append_transit(depth, gas, ascent_speed=ascent_speed)
             if correct_duration_with_transit:
                 duration -= transit_time
         if duration > 0.0:
@@ -426,12 +435,16 @@ class DiveProfile:
         self._points[0].set_cleared_tissue_state(deco_model)
         self._points[0].set_updated_deco_info(deco_model, self._gases_carried)
         state = None
+        # A stop may carry a fourth element: the ascent speed for the segment
+        # leaving it. It travels here from one appended stop to the next
+        # transit (or to the fix-ascent that leaves the final stop).
+        pending_ascent_speed = None
         i = 1
         while i < len(old_points):
             op = old_points[i]
             oldlen = len(self._points)
             # Potentially prepend extra point to cover ascent speed; append original point
-            p, extra_added = self._append_point_fix_ascent(op)
+            p, extra_added = self._append_point_fix_ascent(op, ascent_speed=pending_ascent_speed)
             # Update tissues, based on last point considered
             for j in range(oldlen, len(self._points)):
                 self._points[j].set_updated_tissue_state()
@@ -449,6 +462,7 @@ class DiveProfile:
                     state=state)
                 if len(stops) == 0:
                     # Exceptional case, we were /right/ on the edge
+                    pending_ascent_speed = None
                     i += 1
                     continue
                 # Undo adding this point, then attempt to re-add in next iteration
@@ -456,9 +470,12 @@ class DiveProfile:
                 if extra_added:
                     self._points.pop()
                 # Do not forget to update tissue state and deco info
-                for depth, duration, gas in stops:
+                for s in stops:
+                    depth, duration, gas = s[0], s[1], s[2]
                     np = len(self._points)
-                    self.append_section(depth, duration, gas=gas)
+                    self.append_section(depth, duration, gas=gas,
+                                        ascent_speed=pending_ascent_speed)
+                    pending_ascent_speed = s[3] if len(s) > 3 else None
                     # Update tissue state and deco info
                     for j in range(np, len(self._points)):
                         p = self._points[j]
@@ -468,6 +485,7 @@ class DiveProfile:
             else:
                 # Add new point (tissue state etc is computed correctly by construction)
                 # Careful, there's another i += 1 in an exceptional case above.
+                pending_ascent_speed = None
                 i += 1
         # Done!
         self.update_deco_model_info(deco_model, update_display=True, update_profile=True)

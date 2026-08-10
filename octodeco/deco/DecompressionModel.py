@@ -161,4 +161,10 @@ class DecompressionModel(ABC):
         Returns (stops, p_ceiling, state): the (depth, duration, gas) stop
         triples, the current ceiling as an ambient pressure, and the
         continuation state for subsequent calls.
+
+        A stop may carry an optional fourth element: the ascent speed
+        (m/min) for the segment leaving that stop — from it to the next,
+        shallower stop, or to the surface if it is the last (eg ratio deco's
+        slow final ascent). Stops without it ascend at the dive's normal
+        ascent speed.
         """
