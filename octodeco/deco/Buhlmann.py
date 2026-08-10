@@ -1,16 +1,22 @@
 # Please see LICENSE.md
 """The Bühlmann ZHL-16 decompression model with gradient factors.
 
-Buhlmann drives the heavy lifting in TissueStateCython: it derives ceilings,
-no-decompression limits and full decompression profiles from a tissue state.
+Buhlmann implements the DecompressionModel interface; the heavy lifting is
+driven through TissueStateCython. The model's continuation state (see
+DecompressionModel) is an AmbientToGF: the gradient factor line, fixed once
+an ascent is under way.
 """
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import BuhlmannConstants, Gas, TissueStateCython, Util
+from .DecompressionModel import DecompressionModel
 from .Util import Stop
+
+if TYPE_CHECKING:
+    from .DivePoint import DivePoint
 
 
 class AmbientToGF:
@@ -33,8 +39,8 @@ class AmbientToGF:
         self.p_target = p_target
 
 
-class Buhlmann:
-    """All essential logic for the deco model."""
+class Buhlmann(DecompressionModel):
+    """All essential logic for the Bühlmann deco model."""
 
     def __init__(self,
                  gf_low: float, gf_high: float,
@@ -56,22 +62,54 @@ class Buhlmann:
         # After 8 halftimes, residual is less than 0.5%, so that's infinite enough.
         self._stop_length_infinity = 8 * self._constants.N2_HALFTIMES[-1]
 
-    def description(self) -> str:
-        return f'ZHL-16C GF {self.gf_low}/{self.gf_high}'
-
     def set_gf(self, gf_low: float, gf_high: float) -> None:
         self.gf_low = gf_low
         self.gf_high = gf_high
+
+    #
+    # The DecompressionModel interface. These convert the model-agnostic
+    # (DivePoint, state) arguments to Bühlmann-specific ones (tissue state,
+    # gradient factor line) and delegate to the internal implementations.
+    #
+    def description(self) -> str:
+        return f'ZHL-16C GF {self.gf_low}/{self.gf_high}'
 
     def cleared_tissue_state(self) -> TissueStateCython.TissueState:
         """A tissue state fully saturated at surface pressure on air."""
         return self.TissueState(self._constants, self._rq)
 
+    def NDL(self, point: DivePoint, state: Any = None) -> float:
+        amb_to_gf = self._get_ambtogf(point.tissue_state, point.p_amb,
+                                      Util.SURFACE_PRESSURE, state)
+        return self._ndl(point.tissue_state, amb_to_gf, point.p_amb, point.gas)
+
+    def stop_needed(self, point: DivePoint, state: Any = None) -> bool:
+        # When a GF line is under way, judge against it as-is; _get_ambtogf
+        # would potentially replace it and thereby move the goalposts.
+        amb_to_gf = state if state is not None else \
+            self._get_ambtogf(point.tissue_state, point.p_amb, Util.SURFACE_PRESSURE)
+        return point.tissue_state.max_over_supersat(amb_to_gf, point.p_amb) > 0.01
+
+    def deco_info(self, point: DivePoint, gases_carried: Iterable[Gas.Gas],
+                  state: Any = None) -> dict[str, Any]:
+        return self._deco_info(point.tissue_state, point.depth, point.gas,
+                               gases_carried, amb_to_gf=state)
+
+    def compute_deco_profile(self, point: DivePoint, gases: Iterable[Gas.Gas],
+                             p_target: float = Util.SURFACE_PRESSURE,
+                             add_gas_switch_time: bool = False,
+                             state: Any = None) -> tuple[list[Stop], float, AmbientToGF]:
+        return self._compute_deco_profile(point.tissue_state, point.p_amb,
+                                          point.gas, gases,
+                                          p_target=p_target,
+                                          add_gas_switch_time=add_gas_switch_time,
+                                          amb_to_gf=state)
+
     #
     # NDL, deco stop, deco profile computations
     #
-    def NDL(self, tissue_state: TissueStateCython.TissueState,
-            amb_to_gf: AmbientToGF, p_amb: float, gas: Gas.Gas) -> float:
+    def _ndl(self, tissue_state: TissueStateCython.TissueState,
+             amb_to_gf: AmbientToGF, p_amb: float, gas: Gas.Gas) -> float:
         """No-decompression limit: how long (minutes) we can stay at this
         depth and still ascend directly to the surface."""
         # Binary search on t, the time we still stay at this depth:
@@ -202,13 +240,13 @@ class Buhlmann:
                 p_amb_next_stop = p_amb_gas_switch
         return p_amb_next_stop, new_gas
 
-    def compute_deco_profile(self, tissue_state: TissueStateCython.TissueState,
-                             p_amb: float,
-                             current_gas: Gas.Gas, gases: Iterable[Gas.Gas],
-                             p_target: float = Util.SURFACE_PRESSURE,
-                             add_gas_switch_time: bool = False,
-                             amb_to_gf: AmbientToGF | None = None
-                             ) -> tuple[list[Stop], float, AmbientToGF]:
+    def _compute_deco_profile(self, tissue_state: TissueStateCython.TissueState,
+                              p_amb: float,
+                              current_gas: Gas.Gas, gases: Iterable[Gas.Gas],
+                              p_target: float = Util.SURFACE_PRESSURE,
+                              add_gas_switch_time: bool = False,
+                              amb_to_gf: AmbientToGF | None = None
+                              ) -> tuple[list[Stop], float, AmbientToGF]:
         """Compute the decompression profile from p_amb up to p_target.
 
         Returns (stops, p_ceiling, amb_to_gf), where stops is a list of
@@ -250,10 +288,10 @@ class Buhlmann:
             gas_now = gas_next_stop
         return result, p_ceiling, amb_to_gf
 
-    def deco_info(self, tissue_state: TissueStateCython.TissueState,
-                  depth: float, gas: Gas.Gas,
-                  gases_carried: Iterable[Gas.Gas],
-                  amb_to_gf: AmbientToGF | None = None) -> dict[str, Any]:
+    def _deco_info(self, tissue_state: TissueStateCython.TissueState,
+                   depth: float, gas: Gas.Gas,
+                   gases_carried: Iterable[Gas.Gas],
+                   amb_to_gf: AmbientToGF | None = None) -> dict[str, Any]:
         """All decompression info for one point in a dive: ceilings, gradient
         factors, stops, time to surface, and no-decompression limit."""
         p_amb = Util.depth_to_Pamb(depth)
@@ -273,14 +311,17 @@ class Buhlmann:
         }
 
         # Below is about computing the decompression profile
-        stops, p_ceiling, amb_to_gf = self.compute_deco_profile(
+        stops, p_ceiling, amb_to_gf = self._compute_deco_profile(
             tissue_state, p_amb, gas, gases_carried, amb_to_gf=amb_to_gf)
         nontrivialstops = [s for s in stops if s[1] >= .1]
         result['Ceil'] = Util.Pamb_to_depth(p_ceiling)
         result['Stops'] = stops
         result['FirstStop'] = nontrivialstops[0][0] if len(nontrivialstops) > 0 else 0
-        result['amb_to_gf'] = amb_to_gf
         result['TTS'] = depth / self.ascent_speed + sum(s[1] for s in stops)
-        result['NDL'] = self.NDL(tissue_state, amb_to_gf, p_amb, gas)
+        result['NDL'] = self._ndl(tissue_state, amb_to_gf, p_amb, gas)
+        # The continuation state, both under the interface-level key and,
+        # for Bühlmann-aware consumers (eg the GF line plot), the old name.
+        result['model_state'] = amb_to_gf
+        result['amb_to_gf'] = amb_to_gf
 
         return result

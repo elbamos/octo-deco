@@ -359,10 +359,10 @@ class DiveProfile:
         t0 = time.perf_counter()
         deco_model = self.deco_model()
         self._update_all_tissue_states()
-        amb_to_gf = None
+        state = None
         for p in self._points:
-            p.set_updated_deco_info(deco_model, self._gases_carried, amb_to_gf=amb_to_gf)
-            amb_to_gf = p.deco_info['amb_to_gf']
+            p.set_updated_deco_info(deco_model, self._gases_carried, state=state)
+            state = p.deco_info['model_state']
             p.set_updated_gas_consumption_info(self)
         self.update_deco_model_info(deco_model, update_display=True)
         self._full_info_computation_time = time.perf_counter() - t0
@@ -379,7 +379,7 @@ class DiveProfile:
         self._points = [old_points[0]]
         self._points[0].set_cleared_tissue_state(deco_model)
         self._points[0].set_updated_deco_info(deco_model, self._gases_carried)
-        amb_to_gf = None
+        state = None
         i = 1
         while i < len(old_points):
             op = old_points[i]
@@ -389,20 +389,18 @@ class DiveProfile:
             # Update tissues, based on last point considered
             for j in range(oldlen, len(self._points)):
                 self._points[j].set_updated_tissue_state()
-                self._points[j].set_updated_deco_info(deco_model, self._gases_carried, amb_to_gf=amb_to_gf)
-                amb_to_gf = self._points[j].deco_info['amb_to_gf']
+                self._points[j].set_updated_deco_info(deco_model, self._gases_carried, state=state)
+                state = self._points[j].deco_info['model_state']
             # Are we in violation?
-            if p.tissue_state.max_over_supersat(amb_to_gf, p.p_amb) > 0.01:
-                # Add points before, but take care to live along the GF line
+            if deco_model.stop_needed(p, state):
+                # Add stops before this point, staying within the model's limits
                 before_stop = self._points[-2] if not extra_added else self._points[-3]
-                stops, p_ceiling, amb_to_gf = deco_model.compute_deco_profile(
-                    before_stop.tissue_state,
-                    before_stop.p_amb,
-                    before_stop.gas,
+                stops, p_ceiling, state = deco_model.compute_deco_profile(
+                    before_stop,
                     self._gases_carried,
                     p_target=op.p_amb,
                     add_gas_switch_time=True,
-                    amb_to_gf=amb_to_gf)
+                    state=state)
                 if len(stops) == 0:
                     # Exceptional case, we were /right/ on the edge
                     i += 1
@@ -420,7 +418,7 @@ class DiveProfile:
                         p = self._points[j]
                         p.is_deco_stop = True
                         p.set_updated_tissue_state()
-                        p.set_updated_deco_info(deco_model, self._gases_carried, amb_to_gf=amb_to_gf)
+                        p.set_updated_deco_info(deco_model, self._gases_carried, state=state)
             else:
                 # Add new point (tissue state etc is computed correctly by construction)
                 # Careful, there's another i += 1 in an exceptional case above.

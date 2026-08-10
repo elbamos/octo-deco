@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from . import CNSConstants, Util
 
 if TYPE_CHECKING:
-    from .Buhlmann import AmbientToGF, Buhlmann
+    from .DecompressionModel import DecompressionModel
     from .DiveProfile import DiveProfile
     from .Gas import Gas
     from .TissueStateCython import TissueState
@@ -109,7 +109,7 @@ class DivePoint:
         assert self.prev is not None
         return (self.prev.depth - self.depth) / d
 
-    def set_cleared_tissue_state(self, deco_model: Buhlmann) -> None:
+    def set_cleared_tissue_state(self, deco_model: DecompressionModel) -> None:
         self.tissue_state = deco_model.cleared_tissue_state()
 
     def set_updated_tissue_state(self) -> None:
@@ -134,10 +134,9 @@ class DivePoint:
             + 0.5 * self.duration * (max(sup_sat_now, sup_sat_prev) - min(sup_sat_now, sup_sat_prev))
         self.integral_supersat = self.prev.integral_supersat + sup_sat_int_add
 
-    def set_updated_deco_info(self, deco_model: Buhlmann, gases: Any,
-                              amb_to_gf: AmbientToGF | None = None) -> None:
-        self.deco_info = deco_model.deco_info(self.tissue_state, self.depth,
-                                              self.gas, gases, amb_to_gf=amb_to_gf)
+    def set_updated_deco_info(self, deco_model: DecompressionModel, gases: Any,
+                              state: Any = None) -> None:
+        self.deco_info = deco_model.deco_info(self, gases, state=state)
 
     def set_updated_gas_consumption_info(self, diveprofile: DiveProfile) -> None:
         """Recompute cumulative gas consumption (liters per gas) up to here."""
