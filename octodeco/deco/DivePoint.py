@@ -95,6 +95,49 @@ class DivePoint:
     def duration_deco_only(self) -> float:
         return self.duration if self.is_deco_stop and self.depth > 0 else 0.0
 
+    def _points_before_deco_to_here(self) -> list[DivePoint]:
+        """The points from the start of the dive up to and including this
+        one, cut off at the first point marked as a deco stop."""
+        chain = []
+        p: DivePoint | None = self
+        while p is not None:
+            chain.append(p)
+            p = p.prev
+        chain.reverse()
+        result = []
+        for p in chain:
+            if p.is_deco_stop:
+                break
+            result.append(p)
+        return result
+
+    def bottomtime(self) -> float:
+        """Bottom time in minutes as of this point: diving time up to (not
+        including) the first point marked as a deco stop. Surface time does
+        not count.
+
+        In profiles built by add_stops, the transit to the first stop is
+        itself marked as a deco stop, so bottom time ends at the moment of
+        leaving the bottom.
+        """
+        return sum(p.duration_diving_only() for p in self._points_before_deco_to_here())
+
+    def avg_depth_bottom(self) -> float:
+        """Time-weighted average depth (m) as of this point, over the same
+        segment as bottomtime(); 0.0 if there is no such diving time.
+
+        Depth changes linearly between points, so each segment contributes
+        the mean of its endpoint depths, weighted by its duration.
+        """
+        weighted = 0.0
+        total = 0.0
+        for p in self._points_before_deco_to_here():
+            d = p.duration_diving_only()
+            if d > 0 and p.prev is not None:
+                weighted += d * (p.depth + p.prev.depth) / 2
+                total += d
+        return weighted / total if total > 0 else 0.0
+
     def duration_diving_only(self) -> float:
         if self.depth <= 0 and self.prev is not None and self.prev.depth <= 0:
             return 0.0
