@@ -27,6 +27,7 @@ or None to start fresh. What the token contains is entirely up to the model.
 """
 from __future__ import annotations
 
+import importlib
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
@@ -41,12 +42,22 @@ if TYPE_CHECKING:
 
 # Registry of concrete model types by their MODEL_TYPE name. DiveProfile
 # stores the name (not the class) so that pickled dives survive refactors;
-# subclasses register themselves automatically via __init_subclass__.
+# subclasses register themselves automatically via __init_subclass__ when
+# their module is imported. _MODEL_MODULES says which module provides which
+# type, so model_class() can import it lazily on first lookup — a new model
+# needs an entry here.
 _MODEL_TYPES: dict[str, type[DecompressionModel]] = {}
+_MODEL_MODULES = {
+    'Buhlmann': 'Buhlmann',
+    'RatioDeco': 'RatioDeco',
+}
 
 
 def model_class(model_type: str) -> type[DecompressionModel]:
-    """Look up a registered model class by its MODEL_TYPE name."""
+    """Look up a registered model class by its MODEL_TYPE name, importing
+    the module that provides it if needed."""
+    if model_type not in _MODEL_TYPES and model_type in _MODEL_MODULES:
+        importlib.import_module(f'.{_MODEL_MODULES[model_type]}', __package__)
     return _MODEL_TYPES[model_type]
 
 
