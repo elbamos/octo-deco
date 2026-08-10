@@ -1,96 +1,106 @@
 # Please see LICENSE.md
-# Serializing / deserializing DiveProfiles. Taking into account that data coming out of
-#   database may be older than current version.
+"""Serializing / deserializing DiveProfiles.
+
+Profiles are pickled; data coming out of the database may be older than the
+current version, so deserialization migrates old profiles by filling in any
+attributes added since they were stored.
+"""
+from __future__ import annotations
+
 import datetime
-import pickle;
+import pickle
+from typing import TYPE_CHECKING
 
 import pytz
 
-CURRENT_VERSION = 17;
+if TYPE_CHECKING:
+    from .DiveProfile import DiveProfile
+
+CURRENT_VERSION = 17
 
 
 #
 # Actual migration
 #
-def _migrate_up_to_current(from_version, diveprofile):
+def _migrate_up_to_current(from_version: int, diveprofile: DiveProfile) -> None:
     if not hasattr(diveprofile, 'created'):
-        diveprofile.created = datetime.datetime.now(tz = pytz.timezone('Europe/Amsterdam'));
+        diveprofile.created = datetime.datetime.now(tz=pytz.timezone('Europe/Amsterdam'))
     if not hasattr(diveprofile, '_gas_switch_mins'):
-        diveprofile._gas_switch_mins = 3.0;
+        diveprofile._gas_switch_mins = 3.0
     if not hasattr(diveprofile, '_last_stop_depth'):
-        diveprofile._last_stop_depth = 3;
+        diveprofile._last_stop_depth = 3
     if not hasattr(diveprofile, '_max_pO2_deco'):
-        diveprofile._max_pO2_deco = 1.60;
+        diveprofile._max_pO2_deco = 1.60
     if not hasattr(diveprofile, '_gas_consmp_bottom'):
-        diveprofile._gas_consmp_bottom = 20.0;
+        diveprofile._gas_consmp_bottom = 20.0
     if not hasattr(diveprofile, '_gas_consmp_deco'):
-        diveprofile._gas_consmp_deco = 20.0;
+        diveprofile._gas_consmp_deco = 20.0
     if not hasattr(diveprofile, '_gas_consmp_emerg_factor'):
-        diveprofile._gas_consmp_emerg_factor = 4.0;
+        diveprofile._gas_consmp_emerg_factor = 4.0
     if not hasattr(diveprofile, '_gas_consmp_emerg_mins'):
-        diveprofile._gas_consmp_emerg_mins = 4.0;
+        diveprofile._gas_consmp_emerg_mins = 4.0
 
     # None
-    for attrname in [ 'custom_desc', 'add_custom_desc', '_cylinders_used' ]:
+    for attrname in ['custom_desc', 'add_custom_desc', '_cylinders_used']:
         if not hasattr(diveprofile, attrname):
-            setattr(diveprofile, attrname, None);
+            setattr(diveprofile, attrname, None)
 
     # Bool
-    for attrname in [ 'is_demo_dive', 'is_ephemeral'  ]:
+    for attrname in ['is_demo_dive', 'is_ephemeral']:
         if not hasattr(diveprofile, attrname):
-            setattr(diveprofile, attrname, False);
-    for attrname in [ 'is_public'  ]:
+            setattr(diveprofile, attrname, False)
+    for attrname in ['is_public']:
         if not hasattr(diveprofile, attrname):
-            setattr(diveprofile, attrname, True);
+            setattr(diveprofile, attrname, True)
 
     # Point attributes
     for point in diveprofile.points():
         if not hasattr(point, 'is_ascent_point'):
-            point.is_ascent_point = False;
+            point.is_ascent_point = False
         if not hasattr(point, 'cns_perc'):
-            point.cns_perc = 0.0;
+            point.cns_perc = 0.0
         if not hasattr(point, 'integral_supersat'):
-            point.integral_supersat = 0.0;
+            point.integral_supersat = 0.0
         if not hasattr(point, '_gas_consumption_info'):
-            point.set_updated_gas_consumption_info(diveprofile);
+            point.set_updated_gas_consumption_info(diveprofile)
 
     # v8
     if hasattr(diveprofile, '_deco_model'):
-        diveprofile._deco_model = None;
+        diveprofile._deco_model = None
 
     # Note that we upgraded
-    dive_id = getattr(diveprofile, 'dive_id', None);
-    print('Upgraded dive {} from v{} to v{}'.format(dive_id, from_version, CURRENT_VERSION));
-    diveprofile.db_version = CURRENT_VERSION;
-    diveprofile.update_deco_info();
+    dive_id = getattr(diveprofile, 'dive_id', None)
+    print(f'Upgraded dive {dive_id} from v{from_version} to v{CURRENT_VERSION}')
+    diveprofile.db_version = CURRENT_VERSION
+    diveprofile.update_deco_info()
 
 
 #
 # Interface functions
 #
-def _loads_only(blob):
-    return pickle.loads(blob);
+def _loads_only(blob: bytes) -> DiveProfile:
+    return pickle.loads(blob)
 
 
-def _migrate(diveprofile):
-    version = getattr(diveprofile, 'db_version', 0);
+def _migrate(diveprofile: DiveProfile) -> None:
+    version = getattr(diveprofile, 'db_version', 0)
     if version != CURRENT_VERSION:
-        _migrate_up_to_current(version, diveprofile);
+        _migrate_up_to_current(version, diveprofile)
 
 
-def loads_with_version_info(blob):
-    dp = _loads_only(blob);
-    oldversion = getattr(dp, 'db_version', 0);
-    _migrate(dp);
-    newversion = dp.db_version;
-    return dp, oldversion, newversion;
+def loads_with_version_info(blob: bytes) -> tuple[DiveProfile, int, int]:
+    """Load and migrate a profile; returns (profile, old version, new version)."""
+    dp = _loads_only(blob)
+    oldversion = getattr(dp, 'db_version', 0)
+    _migrate(dp)
+    return dp, oldversion, dp.db_version
 
 
-def loads(blob):
-    # .. = load and migrate
-    dp, _, _ = loads_with_version_info(blob);
-    return dp;
+def loads(blob: bytes) -> DiveProfile:
+    """Load and migrate a profile."""
+    dp, _, _ = loads_with_version_info(blob)
+    return dp
 
 
-def dumps(diveprofile):
-    return pickle.dumps(diveprofile);
+def dumps(diveprofile: DiveProfile) -> bytes:
+    return pickle.dumps(diveprofile)
