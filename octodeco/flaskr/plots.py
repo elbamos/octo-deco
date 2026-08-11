@@ -161,7 +161,10 @@ def show_pressure_graph(diveprofile):
     n_tissues = con.N_TISSUES;
     n2halftimes = con.N2_HALFTIMES;
     show_m_lines = _pg_m_lines(diveprofile, con);
-    pts_for_m_line_gf = [ p for p in pts if hasattr(p, 'deco_info') ];
+    # The GF M-line overlay only makes sense for models with a gradient
+    # factor line (ie Buhlmann); other models' deco_info has no amb_to_gf.
+    pts_for_m_line_gf = [ p for p in pts
+                          if p.deco_info is not None and 'amb_to_gf' in p.deco_info ];
     # Get the rest of the reusable info
     colors = px.colors.qualitative.Dark24;
     x = [ p.p_amb for p in pts ];

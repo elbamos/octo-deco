@@ -579,6 +579,10 @@ class DiveProfile:
     def decotimes_for_gfs(self, gflows: list[float] | None = None,
                           gfhighs: list[float] | None = None
                           ) -> dict[float, dict[float, float]] | None:
+        if 'gf_low' not in self._model_settings_display:
+            # The dive's deco model has no gradient factors (eg ratio deco),
+            # so a GF/decotime table is meaningless.
+            return None
         if gfhighs is None:
             gfhighs = [45, 65, 70, 75, 85, 95]
         if gflows is None:
