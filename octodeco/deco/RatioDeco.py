@@ -142,6 +142,20 @@ class RatioDeco(DecompressionModel):
             return False
         return point.depth < stops[0].depth - 0.01
 
+    def _insert_gas_switches(self, stops: List[Stop], from_gas: Gas.Gas) -> List[Stop]:
+        """Insert gas-switch stops into a schedule: wherever the gas changes,
+        first hold at the switch depth on the old gas for gas_switch_mins;
+        the new gas's planned stop (or the ascent, if it has no duration)
+        follows."""
+        result: List[Stop] = []
+        current_gas = from_gas
+        for s in stops:
+            if s.gas != current_gas:
+                result.append(Stop(s.depth, self.gas_switch_mins, current_gas))
+                current_gas = s.gas
+            result.append(s)
+        return result
+
     def compute_deco_profile(self, point: DivePoint, gases: Iterable[Gas.Gas],
                              p_target: float = Util.SURFACE_PRESSURE,
                              add_gas_switch_time: bool = False,
@@ -259,7 +273,7 @@ class RatioDeco(DecompressionModel):
         ndl = self._NDL(point, state=state)
         if ndl > 0:
             # If we're under the NDL, perform min deco
-            min_stops = generate_min_stops()
+            min_stops = self._insert_gas_switches(generate_min_stops(), bottom_gas)
             p_ceiling = Util.depth_to_Pamb(min_stops[0].depth) if min_stops \
                 else Util.SURFACE_PRESSURE
             return (min_stops, p_ceiling, commit(min_stops))
@@ -276,6 +290,7 @@ class RatioDeco(DecompressionModel):
                 # Too shallow for even a min deco stop
                 return ([], Util.SURFACE_PRESSURE, commit([]))
             stops[-1].duration += deco_time_to_distribue
+            stops = self._insert_gas_switches(stops, bottom_gas)
             return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
         elif point.max_depth() <= 51:
             # Deco at 1:1 ratio
@@ -291,7 +306,9 @@ class RatioDeco(DecompressionModel):
             deco_time += intervals * 5
             time_21_09 = math.ceil(deco_time / 2)
             time_06_03 = math.ceil(deco_time / 2)
-            stops = generate_deep_stops(21) + generate_curve(21, 9, time_21_09) + generate_final_stops(time_06_03)
+            stops = self._insert_gas_switches(
+                generate_deep_stops(21) + generate_curve(21, 9, time_21_09)
+                + generate_final_stops(time_06_03), bottom_gas)
             return (stops, Util.depth_to_Pamb(21), commit(stops))
         elif point.max_depth() <= 72:
             # Deco at 1:2 ratio
@@ -307,7 +324,9 @@ class RatioDeco(DecompressionModel):
             deco_time += intervals * 5
             time_21_09 = math.ceil(deco_time / 2)
             time_06_03 = math.ceil(deco_time / 2)
-            stops = generate_deep_stops(21) + generate_curve(21, 9, time_21_09) + generate_final_stops(time_06_03)
+            stops = self._insert_gas_switches(
+                generate_deep_stops(21) + generate_curve(21, 9, time_21_09)
+                + generate_final_stops(time_06_03), bottom_gas)
             return (stops, Util.depth_to_Pamb(21), commit(stops))
         else:
             raise NotImplementedError('ratio deco is not implemented for dives beyond 72 m')
