@@ -158,13 +158,12 @@ class DecompressionModel(ABC):
         """The decompression profile for ascending from this point to
         p_target.
 
-        Returns (stops, p_ceiling, state): the (depth, duration, gas) stop
-        triples, the current ceiling as an ambient pressure, and the
-        continuation state for subsequent calls.
+        Returns (stops, p_ceiling, state): the Stop objects, the current
+        ceiling as an ambient pressure, and the continuation state for
+        subsequent calls.
 
-        A stop may carry an optional fourth element: the ascent speed
-        (m/min) for the segment leaving that stop — from it to the next,
-        shallower stop, or to the surface if it is the last (eg ratio deco's
-        slow final ascent). Stops without it ascend at the dive's normal
-        ascent speed.
+        A Stop's optional ascent_speed sets the speed (m/min) for the
+        segment leaving that stop — from it to the next, shallower stop, or
+        to the surface if it is the last (eg ratio deco's slow final
+        ascent). Stops without it ascend at the dive's normal ascent speed.
         """

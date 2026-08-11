@@ -16,7 +16,9 @@ import pytz
 if TYPE_CHECKING:
     from .DiveProfile import DiveProfile
 
-CURRENT_VERSION = 18
+# v19: deco_info['Stops'] entries became Util.Stop dataclasses (older dives
+# carry plain tuples; migration's update_deco_info() recomputes them).
+CURRENT_VERSION = 19
 
 
 #

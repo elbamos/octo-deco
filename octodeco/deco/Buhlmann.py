@@ -258,7 +258,7 @@ class Buhlmann(DecompressionModel):
         """Compute the decompression profile from p_amb up to p_target.
 
         Returns (stops, p_ceiling, amb_to_gf), where stops is a list of
-        (depth, duration, gas) triples.
+        Stop objects.
         """
         amb_to_gf = self._get_ambtogf(tissue_state, p_amb, p_target, amb_to_gf)
         p_ceiling = tissue_state.p_ceiling_for_amb_to_gf(amb_to_gf)
@@ -281,16 +281,16 @@ class Buhlmann(DecompressionModel):
                                                     tissue_state, gas_now, amb_to_gf)
             tissue_state = tissue_state.updated_state(stoplength, p_now, gas_now)
             if stoplength > self.stop_length_precision:
-                result.append((Util.Pamb_to_depth(p_now), stoplength, gas_now))
+                result.append(Stop(Util.Pamb_to_depth(p_now), stoplength, gas_now))
             # Travel to next stop
             tissue_state = self._update_tissue_state_travel(tissue_state, p_now,
                                                             p_amb_next_stop, gas_now)
             # Consider adding gas switch
             if gas_now != gas_next_stop and add_gas_switch_time:
-                result.append((Util.Pamb_to_depth(p_amb_next_stop), self.gas_switch_mins, gas_now))
+                result.append(Stop(Util.Pamb_to_depth(p_amb_next_stop), self.gas_switch_mins, gas_now))
                 tissue_state = tissue_state.updated_state(self.gas_switch_mins,
                                                           p_amb_next_stop, gas_now)
-                result.append((Util.Pamb_to_depth(p_amb_next_stop), 0.0, gas_next_stop))
+                result.append(Stop(Util.Pamb_to_depth(p_amb_next_stop), 0.0, gas_next_stop))
             # Onto the next stop!
             p_now = p_amb_next_stop
             gas_now = gas_next_stop
@@ -308,11 +308,11 @@ class Buhlmann(DecompressionModel):
         # Below is about computing the decompression profile
         stops, p_ceiling, amb_to_gf = self._compute_deco_profile(
             tissue_state, p_amb, gas, gases_carried, amb_to_gf=amb_to_gf)
-        nontrivialstops = [s for s in stops if s[1] >= .1]
+        nontrivialstops = [s for s in stops if s.duration >= .1]
         result['Ceil'] = Util.Pamb_to_depth(p_ceiling)
         result['Stops'] = stops
-        result['FirstStop'] = nontrivialstops[0][0] if len(nontrivialstops) > 0 else 0
-        result['TTS'] = depth / self.ascent_speed + sum(s[1] for s in stops)
+        result['FirstStop'] = nontrivialstops[0].depth if len(nontrivialstops) > 0 else 0
+        result['TTS'] = depth / self.ascent_speed + sum(s.duration for s in stops)
         result['NDL'] = self._ndl(tissue_state, amb_to_gf, p_amb, gas)
         # The continuation state, both under the interface-level key and,
         # for Bühlmann-aware consumers (eg the GF line plot), the old name.

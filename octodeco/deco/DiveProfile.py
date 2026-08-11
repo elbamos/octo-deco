@@ -435,9 +435,9 @@ class DiveProfile:
         self._points[0].set_cleared_tissue_state(deco_model)
         self._points[0].set_updated_deco_info(deco_model, self._gases_carried)
         state = None
-        # A stop may carry a fourth element: the ascent speed for the segment
-        # leaving it. It travels here from one appended stop to the next
-        # transit (or to the fix-ascent that leaves the final stop).
+        # A stop's ascent_speed governs the segment leaving it. It travels
+        # here from one appended stop to the next transit (or to the
+        # fix-ascent that leaves the final stop).
         pending_ascent_speed = None
         i = 1
         while i < len(old_points):
@@ -471,11 +471,10 @@ class DiveProfile:
                     self._points.pop()
                 # Do not forget to update tissue state and deco info
                 for s in stops:
-                    depth, duration, gas = s[0], s[1], s[2]
                     np = len(self._points)
-                    self.append_section(depth, duration, gas=gas,
+                    self.append_section(s.depth, s.duration, gas=s.gas,
                                         ascent_speed=pending_ascent_speed)
-                    pending_ascent_speed = s[3] if len(s) > 3 else None
+                    pending_ascent_speed = s.ascent_speed
                     # Update tissue state and deco info
                     for j in range(np, len(self._points)):
                         p = self._points[j]

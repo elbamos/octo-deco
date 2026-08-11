@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -29,11 +30,19 @@ SURFACE_PRESSURE = 1.01325           # bar
 BAR_PER_METER = 1020 * 9.80 * 1e-5   # = 0.09996
 METER_PER_BAR = 1 / BAR_PER_METER    # = 10.0040
 
-# A single decompression stop: (depth, duration, gas breathed at the stop),
-# optionally extended with a fourth element: the ascent speed (m/min) to use
-# when leaving the stop, ie for the travel from this stop to the next,
-# shallower one. Without it, ascents happen at the dive's normal ascent speed.
-Stop = tuple[float, float, 'Gas'] | tuple[float, float, 'Gas', float]
+@dataclass
+class Stop:
+    """A single decompression stop.
+
+    ascent_speed, when set, is the speed (m/min) for the segment leaving
+    this stop — the travel from it to the next, shallower stop, or to the
+    surface if it is the last one. None means the dive's normal ascent
+    speed.
+    """
+    depth: float                      # meters
+    duration: float                   # minutes
+    gas: 'Gas'                        # breathed at the stop
+    ascent_speed: float | None = None
 
 
 def Pamb_to_depth(p_amb: float) -> float:
@@ -84,11 +93,11 @@ def next_stop_Pamb(p_amb: float, last_stop_depth: float = 3) -> float:
 
 def stops_to_string(stops: Iterable[Stop]) -> str:
     """Compact human-readable rendering of stops, eg '3@21m 8@9m'."""
-    return ' '.join(f'{round(duration):.0f}@{depth:.0f}m'
-                    for depth, duration, *_ in stops if duration >= 0.1)
+    return ' '.join(f'{round(s.duration):.0f}@{s.depth:.0f}m'
+                    for s in stops if s.duration >= 0.1)
 
 
 def stops_to_string_precise(stops: Iterable[Stop]) -> str:
     """Precise rendering of stops including gas, eg '2.7@21m[Nx50]'."""
-    return ' '.join(f'{duration:.1f}@{depth:.0f}m[{gas}]'
-                    for depth, duration, gas, *_ in stops)
+    return ' '.join(f'{s.duration:.1f}@{s.depth:.0f}m[{s.gas}]'
+                    for s in stops)
