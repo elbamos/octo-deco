@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Response, status;
 from sqlite3 import Connection;
-from typing import List;
+from typing import List, Optional;
 from .app import get_db;
 from .dive import DBDive;
 
@@ -22,7 +22,7 @@ def get_all_dives(user_id: str, db: Connection = Depends(get_db)):
     return [ DBDive.from_row(row) for row in rows ];
 
 
-@router.get("/any/", response_model = DBDive)
+@router.get("/any/", response_model = Optional[ DBDive ])
 def get_any_dive(user_id: str, db: Connection = Depends(get_db)):
     cur = db.cursor();
     cur.execute('''
@@ -37,7 +37,7 @@ def get_any_dive(user_id: str, db: Connection = Depends(get_db)):
     return DBDive.from_row(row);
 
 
-@router.get("/get/", response_model = DBDive)
+@router.get("/get/", response_model = Optional[ DBDive ])
 def get_one_dive(dive_id: str, response: Response, db: Connection = Depends(get_db)):
     cur = db.cursor();
     cur.execute('''
