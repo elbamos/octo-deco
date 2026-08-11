@@ -57,8 +57,10 @@ class RatioDeco(DecompressionModel):
                  last_stop_depth: float = 3):
         super().__init__()
         self.descent_speed = descent_speed
-        self.ascent_speed = 3
-        self.max_pO2_deco = 1.6
+        # In deco, every 3 m of ascent takes 30 seconds; combined with the
+        # standard 30-second stops, each 3 m increment costs one minute.
+        self.ascent_speed = 6
+        self.max_pO2_deco = max_pO2_deco
         self.gas_switch_mins = gas_switch_mins
         self.last_stop_depth = last_stop_depth
         self.curve_shape = curve_shape
@@ -206,8 +208,7 @@ class RatioDeco(DecompressionModel):
             return RatioDecoState(stops) if ascent_begun else state
 
         def add_stop(stops: List[Stop], depth: float, duration: float):
-            ascent_speed = 0.75 if depth == self.last_stop_depth else 1.5
-            new_stop = Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), ascent_speed)
+            new_stop = Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
             stops.append(new_stop)
 
         def generate_min_stops() -> List[Stop]:
@@ -226,7 +227,7 @@ class RatioDeco(DecompressionModel):
             stops[-2] = stops[-3] = math.ceil(stops[-2] / 2)
             stops[0] = stops[1] = math.ceil(stops[0] + (time_to_distribute / 2))
 
-            return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), 1.6), 3)
+            return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
                     for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
 
         def generate_expo_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
@@ -240,7 +241,7 @@ class RatioDeco(DecompressionModel):
             stops[3] = math.ceil(stops[3] + time_to_distribute / 2)
             stops[4] = math.ceil(stops[4] + time_to_distribute / 2)
 
-            return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), 1.6), 3)
+            return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
                     for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
 
         if self.curve_shape == "s-curve":
@@ -249,11 +250,10 @@ class RatioDeco(DecompressionModel):
             generate_curve = generate_expo_curve
 
         def generate_final_stops(duration: int) -> List[Stop]:
-            # TODO: Is the ascent speed right on the final stops
             # TODO: What's the right ratio for 20 and 10' stops.
             return [
-                Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), 1.6), 1.5),
-                Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), 1.6), 0.75)
+                Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed),
+                Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed)
             ]
 
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
