@@ -200,7 +200,7 @@ class RatioDeco(DecompressionModel):
             min_stops = []
 
             stop_depth = 3 * math.ceil(point.max_depth() / 2 / 3)
-            while stop_depth > self.last_stop_depth:
+            while stop_depth >= self.last_stop_depth:
                 add_stop(min_stops, stop_depth, 0.5)
                 stop_depth -= 3
 
@@ -269,7 +269,7 @@ class RatioDeco(DecompressionModel):
             # to how far over the NDL we are
             deco_time_to_distribue = - math.ceil(ndl)
             stops = generate_min_stops()
-            has_O2 = Gas.best_gas(gases, Util.depth_to_Pamb(3), 1.6) == Gas.Nitrox(100)
+            has_O2 = Gas.best_gas(gases, Util.depth_to_Pamb(3), 1.6) == Gas.Nitrox(99)
             if has_O2:
                 deco_time_to_distribue = math.ceil(deco_time_to_distribue / 2)
             if len(stops) == 0:
