@@ -103,7 +103,9 @@ class DecompressionModel(ABC):
         gf99s, gf99, leading_tissue_i = tissue_state.GF99_all_info(p_amb)
         surfacegf = tissue_state.GF99(Util.SURFACE_PRESSURE)
         return {
-            'Ceil99': Util.Pamb_to_depth(p_ceiling_99),
+            # The raw ceiling can be shallower than the surface (clean
+            # tissues); clamp at 0 so it never plots above the waterline.
+            'Ceil99': max(0.0, Util.Pamb_to_depth(p_ceiling_99)),
             'GF99': round(gf99, 1),
             'SurfaceGF': round(surfacegf, 1),
             'LeadingTissueIndex': leading_tissue_i,
