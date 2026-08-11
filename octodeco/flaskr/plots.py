@@ -13,26 +13,6 @@ from octodeco.deco import Util;
 def show_diveprofile(diveprofile):
     df = diveprofile.dataframe();
     fig = sp.make_subplots(specs = [ [ {"secondary_y": True} ] ])
-    # First stop: a bit complicated code for adding the shaded area
-    fs_xs = list(df[ "time" ]);
-    fs_ys1 = list(df[ "FirstStop" ]);
-    fs_ys2 = [ 0 for y in fs_ys1 ];
-    comp_x = fs_xs + [ fs_xs[ -1 ], fs_xs[ -1 ] ] + fs_xs[ ::-1 ];
-    comp_y = fs_ys2 + [ 0, fs_ys1[ -1 ] ] + fs_ys1[ ::-1 ];
-    stopinfo = list(df[ "Stops"]);
-    stopinfo = stopinfo + ['',''] + stopinfo[ ::-1 ];
-    fig.add_trace(go.Scatter(
-        x = comp_x,
-        y = comp_y,
-        fill = 'toself',
-        fillcolor = 'rgba(255,0,0,0.2)',
-        line_color = 'rgba(255,0,0,0)',
-        customdata = stopinfo,
-        hoveron = 'points+fills',
-        hovertemplate = 'Stops at %{x:.1f}mins: %{customdata}<extra></extra>',
-        showlegend = True,
-        name = 'Stops',
-    ))
     # ppO2
     fig.add_trace(go.Scatter(x = df[ "time" ], y = 100 * df[ "ppO2" ], name = 'ppO2',
                              hovertemplate = 'ppO2: %{customdata:.2f} @ %{x:.1f}mins<extra></extra>',
@@ -107,22 +87,33 @@ def show_diveprofile(diveprofile):
 
 def show_heatmap(diveprofile):
     # https://plot.ly/python/heatmaps/
+    # Shows compartment inert gas pressure: loading during the bottom phase,
+    # off-gassing during deco. (GF99 is unsuitable as the color value: it is
+    # negative/zero whenever a tissue is below its M-value, so nothing shows
+    # until decompression.) GF99 is still reported in the hover.
     tissue_labels = [ 'T%s' % t for t in diveprofile.deco_model()._constants.N2_HALFTIMES ];
     tissue_labels.reverse();
 
-    values = [ list(p.deco_info[ 'allGF99s' ]) for p in diveprofile.points() ];
-    for v in values:
+    points = diveprofile.points();
+    n_tissues = len(tissue_labels);
+    pressures = [ [ p.tissue_state.p_tissue(i) for i in range(n_tissues) ] for p in points ];
+    gf99s = [ list(p.deco_info[ 'allGF99s' ]) for p in points ];
+    for v in pressures:
         v.reverse();
-    values = numpy.transpose(values);
+    for v in gf99s:
+        v.reverse();
+    pressures = numpy.transpose(pressures);
+    gf99s = numpy.transpose(gf99s);
 
-    times = [ p.time for p in diveprofile.points() ]
+    times = [ p.time for p in points ]
 
     fig = go.Figure(data = go.Heatmap(
-        z = values,
+        z = pressures,
+        customdata = gf99s,
         y = tissue_labels,
         x = times,
-        hovertemplate = '%{x:.1f}mins, %{y}, GF: %{z:.1f}%<extra></extra>',
-        zauto = False, zmin = 0, zmax = 100 ));
+        hovertemplate = '%{x:.1f}mins, %{y}: %{z:.2f} bar (GF99: %{customdata:.0f}%)<extra></extra>',
+        zauto = False, zmin = 0, zmax = float(pressures.max()) ));
 
     graphjson = json.dumps(fig, cls = plotly.utils.PlotlyJSONEncoder);
     return graphjson;
