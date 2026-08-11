@@ -214,11 +214,12 @@ class CachedDiveProfile:
         def format_map(v):
             return v[1];
         df = pandas.DataFrame(dtt2).transpose();
+        # Styler.render()/applymap() were removed/renamed in modern pandas
         styled_df = df.style\
             .set_table_attributes('class="dataframe gfdecotable smalltable"')\
-            .applymap(style_map)\
+            .map(style_map)\
             .format(format_map)\
-            .render(classes="smalltable");
+            .to_html();
         html_comp_time = 'Computation time: {:.2f}s.'.format(t1-t0);
         return styled_df + '<br/>' + html_comp_time;
 

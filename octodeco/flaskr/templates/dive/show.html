@@ -1,7 +1,9 @@
 {% extends 'base.html' %}
 
 {% block extrascripts %}
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        {# plotly-latest on the CDN is frozen at v1.58; pin a version able to
+           decode the typed-array (bdata) JSON that modern plotly.py emits #}
+        <script src="https://cdn.plot.ly/plotly-3.7.0.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.6/d3.min.js"></script>
         <script>window.Plotly || document.write('<script src="{{ url_for('static', filename='js/fallback/plotly-latest.min.js') }}"><\/script>');</script>
         <script>window.d3 || document.write('<script src="{{ url_for('static', filename='js/fallback/d3.min.js') }}"><\/script>');</script>
