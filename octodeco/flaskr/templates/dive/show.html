@@ -50,7 +50,9 @@
         r =  $('#form_update').serialize();
         if (r == undefined || r == '')
         {
-            r = $.param({gflow:{{dive.gf_low_display}}, gfhigh:{{dive.gf_high_display}}})
+            {# Dives on models without gradient factors (eg ratio deco) have
+               no GF attributes; fall back to the defaults. #}
+            r = $.param({gflow:{{dive.gf_low_display or 35}}, gfhigh:{{dive.gf_high_display or 70}}})
         }
         return r;
     }
@@ -217,8 +219,8 @@
     }
     function set_gf_to_defaults()
     {
-        default_gf_low = urlParam('gflow', {{dive.gf_low_profile}});
-        default_gf_high = urlParam('gfhigh', {{dive.gf_high_profile}});
+        default_gf_low = urlParam('gflow', {{dive.gf_low_profile or 35}});
+        default_gf_high = urlParam('gfhigh', {{dive.gf_high_profile or 70}});
         $('#show_gflow').text(default_gf_low);
         $('#ipt_gflow').val(default_gf_low);
         $('#ipttxt_gflow').val(default_gf_low);
