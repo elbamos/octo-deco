@@ -384,6 +384,12 @@
                 <option value="s-curve" {% if cur_curve == 's-curve' %}selected{% endif %}>s-curve</option>
                 <option value="exponential" {% if cur_curve == 'exponential' %}selected{% endif %}>exponential</option>
             </select>
+            &nbsp; Units:
+            <select name="units" id="ipt_units" onchange="reload_all();">
+                {% set cur_units = session.get('units', 'metric') %}
+                <option value="metric" {% if cur_units == 'metric' %}selected{% endif %}>metric</option>
+                <option value="imperial" {% if cur_units == 'imperial' %}selected{% endif %}>imperial</option>
+            </select>
         {% if modify_allowed %}
             <input type="submit" name="action" value="Update Stops">
         {% else %}

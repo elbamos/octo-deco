@@ -7,7 +7,7 @@ from flask import (
 )
 from markupsafe import escape;
 
-from . import app, plots, user, db_api_dive;
+from . import app, plots, units, user, db_api_dive;
 from .util.features import AllowedFeature as uft;
 
 cache = app.get_the_cache();
@@ -50,8 +50,16 @@ def get_gf_args_from_request():
         curve = args.get('curve');
         if curve not in ('s-curve', 'exponential'):
             curve = 's-curve';
+        # Display units; remembered in the session so the choice sticks
+        # across dives and page loads.
+        u = args.get('units');
+        if u in ('metric', 'imperial'):
+            session['units'] = u;
+        else:
+            u = session.get('units', 'metric');
         # Done
-        g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh, 'model': model, 'curve': curve };
+        g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh, 'model': model, 'curve': curve,
+                      'units': u };
     return g.gf_args;
 
 
@@ -160,7 +168,8 @@ class CachedDiveProfile:
         other_label = 'Ratio deco' if other == 'RatioDeco' else 'Bühlmann';
         try:
             jp = plots.show_diveprofile(dp, other_profile = other_dp,
-                                        other_label = other_label);
+                                        other_label = other_label,
+                                        imperial = units.is_imperial(req_args));
         except TypeError:
             jp = {};
         return jsonify(jp);
@@ -186,7 +195,10 @@ class CachedDiveProfile:
     @cache.memoize()
     def summary_table(self, req_args):
         dp = self.profile_args(req_args)
-        dsdf = pandas.DataFrame([ [ k, v ] for k, v in dp.dive_summary().items() ]);
+        ds = dp.dive_summary();
+        if units.is_imperial(req_args):
+            ds['Last stop'] = '{:.0f} ft'.format(units.depth(dp._last_stop_depth, True));
+        dsdf = pandas.DataFrame([ [ k, v ] for k, v in ds.items() ]);
         dsdf_table = dsdf.to_html(classes="smalltable", header="true");
         return dsdf_table;
 
@@ -197,22 +209,31 @@ class CachedDiveProfile:
         if rtt is None:
             return 'A runtime table is unfortunately not available for this dive.';
         dsdf = pandas.DataFrame(rtt);
+        imperial = units.is_imperial(req_args);
+        du = units.depth_unit(imperial);
+        vu = units.volume_unit(imperial);
+        pu = units.pressure_unit(imperial);
         desired_col_seq = [ 'depth', 'time', 'gas', 'gas_usage' ];
         for c in set(desired_col_seq).difference(dsdf.columns):
             dsdf[ c ] = '';
-        dsdf = dsdf[ desired_col_seq ].rename(columns = {'gas_usage': 'gas usage'});
+        dsdf = dsdf[ desired_col_seq ].rename(columns = {'depth': 'depth ({})'.format(du),
+                                                         'gas_usage': 'gas usage'});
         frm = {
-            'depth': lambda x: '{:.0f}'.format(x),
+            'depth ({})'.format(du): lambda x: '{:.0f}'.format(units.depth(x, imperial)),
             'time': lambda x: '{:.1f}'.format(x) if not pandas.isnull(x) else '',
             'gas': str,
-            'gas usage': lambda d: ', '.join([ '{}: {:.0f}L used ({:.0f} bar from {})'.format(gas,inf['liters_used'], inf['bars_used'], inf['cyl_name']) for gas,inf in d.items() ])
+            'gas usage': lambda d: ', '.join([ '{}: {:.0f}{} used ({:.0f} {} from {})'.format(gas, units.volume(inf['liters_used'], imperial), vu, units.pressure(inf['bars_used'], imperial), pu, inf['cyl_name']) for gas,inf in d.items() ])
         };
         dsdf_table = dsdf.to_html(classes="smalltable", header="true",
                                   formatters=frm, na_rep='');
         return dsdf_table;
 
     @cache.memoize()
-    def gas_consumption_table(self):
+    def gas_consumption_table(self, req_args):
+        imperial = units.is_imperial(req_args);
+        du = units.depth_unit(imperial);
+        vu = units.volume_unit(imperial);
+        pu = units.pressure_unit(imperial);
         def format_lost_gas_link(slost):
             if slost is None:
                 return 'planned';
@@ -220,8 +241,9 @@ class CachedDiveProfile:
                 return '<a href="{}?lostgas={}">lost {}</a>'.\
                     format(url_for('dive.new_ephm_lost_gas', dive_id=self.dive_id), slost, slost);
         def format_emergency(dp, dict_emerg):
-            tooltip = 'In the event of an emergency ({:.0f}x, {:.0f}mins) at {:.0f}m you need {:.0f}% of the bottom gas {} in your {}'\
-                .format(dp._gas_consmp_emerg_factor, dp._gas_consmp_emerg_mins, dp.max_depth(),
+            tooltip = 'In the event of an emergency ({:.0f}x, {:.0f}mins) at {:.0f}{} you need {:.0f}% of the bottom gas {} in your {}'\
+                .format(dp._gas_consmp_emerg_factor, dp._gas_consmp_emerg_mins,
+                        units.depth(dp.max_depth(), imperial), du,
                         dict_emerg['perc_emerg'], dict_emerg['bottom_gas'], dict_emerg['cyl_name']);
             text = '{:.0f}%'.format(dict_emerg['perc_emerg']);
             cl = 'gas_{}'.format(dict_emerg['ok']);
@@ -229,9 +251,9 @@ class CachedDiveProfile:
         def format_gas_usage(gas, inf):
             if inf['liters'] == 0.0:
                 return '-';
-            text1 = '{:.0f}L'.format(inf['liters']);
+            text1 = '{:.0f}{}'.format(units.volume(inf['liters'], imperial), vu);
             text2 = '{:.0f}%'.format(inf['perc']);
-            tooltip = '{:.0f}bar of {}'.format(inf['bars'], inf['cyl_name']);
+            tooltip = '{:.0f} {} of {}'.format(units.pressure(inf['bars'], imperial), pu, inf['cyl_name']);
             cl = 'gas_{}'.format(inf['ok']);
             r = '{} [<span class="tooltip {}">{}<span class="tooltiptext">{}</span></span>]'.format(text1, cl, text2, tooltip);
             return r;
@@ -247,15 +269,25 @@ class CachedDiveProfile:
             for s in gct };
         dsdf = pandas.DataFrame(gct_formatted);
         dsdf_table = dsdf.to_html(classes="smalltable", na_rep='', escape=False);
-        info = 'Computed with bottom: {:.1f}L/min, deco: {:.1f}L/min.'.\
-            format(dp._gas_consmp_bottom, dp._gas_consmp_deco);
+        info = 'Computed with bottom: {:.1f}{}/min, deco: {:.1f}{}/min.'.\
+            format(units.volume(dp._gas_consmp_bottom, imperial), vu,
+                   units.volume(dp._gas_consmp_deco, imperial), vu);
         warning = ' This does not always fully take max pO2 into account.';
         return dsdf_table + '<br/>'+ info + warning;
 
     @cache.memoize()
     def full_table(self, req_args):
         dp = self.profile_args(req_args);
-        fulldata_table = dp.dataframe().to_html(classes = "bigtable", header = "true");
+        df = dp.dataframe();
+        if units.is_imperial(req_args):
+            # Depth-valued columns; other columns are minutes / bar /
+            # percentages, and the Stops string stays metric (library form).
+            for c in ('depth', 'FirstStop', 'Ceil', 'Ceil99'):
+                df[c] = df[c].map(lambda v: units.depth(v, True)
+                                  if isinstance(v, (int, float)) else v);
+            df = df.rename(columns = {c: '{} (ft)'.format(c)
+                                      for c in ('depth', 'FirstStop', 'Ceil', 'Ceil99')});
+        fulldata_table = df.to_html(classes = "bigtable", header = "true");
         return fulldata_table;
 
     @cache.memoize()

@@ -8,19 +8,23 @@ import plotly.graph_objects as go
 import plotly.subplots as sp
 
 from octodeco.deco import Util;
+from . import units;
 
 
-def show_diveprofile(diveprofile, other_profile = None, other_label = None):
+def show_diveprofile(diveprofile, other_profile = None, other_label = None,
+                     imperial = False):
     df = diveprofile.dataframe();
+    dconv = units.M_TO_FT if imperial else 1.0;
+    du = units.depth_unit(imperial);
     fig = sp.make_subplots(specs = [ [ {"secondary_y": True} ] ])
     # The other deco model's plan, depth only, drawn first so the primary
     # depth line ends up on top
     if other_profile is not None:
         fig.add_trace(go.Scatter(x = [ p.time for p in other_profile.points() ],
-                                 y = [ p.depth for p in other_profile.points() ],
+                                 y = [ dconv * p.depth for p in other_profile.points() ],
                                  name = f'Depth ({other_label})',
                                  hovertemplate = 'Depth (' + (other_label or '') +
-                                                 '): %{y:.1f}m @ %{x:.1f}mins<extra></extra>',
+                                                 '): %{y:.1f}' + du + ' @ %{x:.1f}mins<extra></extra>',
                                  line = {'color': 'rgb(150,150,165)', 'dash': 'dash', 'width': 2}));
     # ppO2
     fig.add_trace(go.Scatter(x = df[ "time" ], y = 100 * df[ "ppO2" ], name = 'ppO2',
@@ -57,13 +61,13 @@ def show_diveprofile(diveprofile, other_profile = None, other_label = None):
                              visible = "legendonly"),
                   secondary_y = True);
     # Ceil99
-    fig.add_trace(go.Scatter(x = df[ "time" ], y = df[ "Ceil99" ], name = 'Ceil GF99',
-                             hovertemplate = 'Ceil GF99: %{y:.1f}m @ %{x:.1f}mins<extra></extra>',
+    fig.add_trace(go.Scatter(x = df[ "time" ], y = dconv * df[ "Ceil99" ], name = 'Ceil GF99',
+                             hovertemplate = 'Ceil GF99: %{y:.1f}' + du + ' @ %{x:.1f}mins<extra></extra>',
                              line = {'color': 'rgb(251,165,56)', 'dash': 'dot', 'width': 2},
                              visible = "legendonly"));
     # Ceil
-    fig.add_trace(go.Scatter(x = df[ "time" ], y = df[ "Ceil" ], name = 'Ceil',
-                             hovertemplate = 'Ceil: %{y:.1f}m @ %{x:.1f}mins<extra></extra>',
+    fig.add_trace(go.Scatter(x = df[ "time" ], y = dconv * df[ "Ceil" ], name = 'Ceil',
+                             hovertemplate = 'Ceil: %{y:.1f}' + du + ' @ %{x:.1f}mins<extra></extra>',
                              line = {'color': 'rgb(251,165,56)', 'dash': 'dot', 'width': 2}));
     # SurfaceGF
     fig.add_trace(go.Scatter(x = df[ "time" ], y = df[ "SurfaceGF" ], name = 'SurfaceGF',
@@ -77,8 +81,8 @@ def show_diveprofile(diveprofile, other_profile = None, other_label = None):
                              line = {'color': 'rgb(255,255,0)', 'width': 3}),
                   secondary_y = True);
     # Depth
-    fig.add_trace(go.Scatter(x = df[ "time" ], y = df[ "depth" ], name = 'Depth',
-                             hovertemplate = 'Depth: %{y:.1f}m @ %{x:.1f}mins<extra></extra>',
+    fig.add_trace(go.Scatter(x = df[ "time" ], y = dconv * df[ "depth" ], name = 'Depth',
+                             hovertemplate = 'Depth: %{y:.1f}' + du + ' @ %{x:.1f}mins<extra></extra>',
                              line = {'color': 'rgb(30,7,143)', 'width': 3}));
     # Leading tissue -> not that interesting
     # fig.add_trace( go.Scatter( x=df["time"], y=(100/16)*(df["LeadingTissueIndex"]+2), name='Leading tissue',
@@ -86,7 +90,8 @@ def show_diveprofile(diveprofile, other_profile = None, other_label = None):
     #                secondary_y = True );
 
     #  Set some axes parameters
-    fig.update_yaxes(secondary_y = False, autorange = "reversed");
+    fig.update_yaxes(secondary_y = False, autorange = "reversed",
+                     title_text = 'Depth ({})'.format(du));
     fig.update_yaxes(secondary_y = True, showgrid = False, range = [ -1, 140 ], tick0 = 0, dtick = 20);
     fig.update_xaxes(title_text = "Time");
     # Draw

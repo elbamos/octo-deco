@@ -33,7 +33,7 @@ def show_elt_summary_table(dive_id):
     reqargs = dive.get_gf_args_from_request();
     r1 = cdp.summary_table(reqargs);
     r2 = cdp.runtime_table(reqargs);
-    r3 = cdp.gas_consumption_table();
+    r3 = cdp.gas_consumption_table(reqargs);
     return '{}\n<h3>Runtime</h3>\n{}\n<h3>Gas consumption</h3>\n{}\n'.format(r1,r2,r3);
 
 
