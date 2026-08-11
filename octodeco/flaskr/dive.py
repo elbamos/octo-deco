@@ -116,6 +116,12 @@ class CachedDiveProfile:
             cp.update_stops();
         except Exception as err:
             return (None, str(err) or type(err).__name__);
+        if model_type == 'RatioDeco':
+            # In ratio deco there is no surface stop: the plan ends at
+            # surfacing. Without this, update_stops re-appends the stored
+            # dive's surface section right after the last (3 m) stop, where
+            # it reads as deco time spent at 0 m.
+            cp.remove_surface_at_end();
         return (cp, None);
 
     def profile_plan(self, req_args, model_type):
