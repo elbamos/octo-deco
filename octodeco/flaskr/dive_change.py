@@ -17,9 +17,11 @@ def update(dive_id):
         abort(404);
     # Do
     if action == 'Update Stops':
-        olddecotime = dp.decotime();
-        dp.set_gf(dp.gf_low_display, dp.gf_high_display, updateStops = True);
-        flash('Recomputed stops (deco time: {} -> {} mins)'.format(round(olddecotime), round(dp.decotime())));
+        # The displayed profile is already the plan for the selected deco
+        # model and settings (see CachedDiveProfile.profile_args); persist it.
+        cdp = dive.get_cached_dive(dive_id, dp.user_id);
+        olddecotime = cdp.stored_decotime() if cdp is not None else dp.decotime();
+        flash('Updated stops (deco time: {} -> {} mins)'.format(round(olddecotime), round(dp.decotime())));
         db_api_dive.store_dive(dp);
         dive.invalidate_cached_dive(dive_id);
         return redirect(url_for('dive.show', dive_id=dive_id));

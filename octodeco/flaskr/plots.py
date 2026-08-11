@@ -10,9 +10,18 @@ import plotly.subplots as sp
 from octodeco.deco import Util;
 
 
-def show_diveprofile(diveprofile):
+def show_diveprofile(diveprofile, other_profile = None, other_label = None):
     df = diveprofile.dataframe();
     fig = sp.make_subplots(specs = [ [ {"secondary_y": True} ] ])
+    # The other deco model's plan, depth only, drawn first so the primary
+    # depth line ends up on top
+    if other_profile is not None:
+        fig.add_trace(go.Scatter(x = [ p.time for p in other_profile.points() ],
+                                 y = [ p.depth for p in other_profile.points() ],
+                                 name = f'Depth ({other_label})',
+                                 hovertemplate = 'Depth (' + (other_label or '') +
+                                                 '): %{y:.1f}m @ %{x:.1f}mins<extra></extra>',
+                                 line = {'color': 'rgb(150,150,165)', 'dash': 'dash', 'width': 2}));
     # ppO2
     fig.add_trace(go.Scatter(x = df[ "time" ], y = 100 * df[ "ppO2" ], name = 'ppO2',
                              hovertemplate = 'ppO2: %{customdata:.2f} @ %{x:.1f}mins<extra></extra>',

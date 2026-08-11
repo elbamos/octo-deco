@@ -107,6 +107,14 @@ class DiveProfile:
     def gf_high_profile(self, value: float) -> None:
         self._model_settings_profile['gf_high'] = value
 
+    def deco_model_type(self) -> str:
+        """The registry name of this dive's decompression model."""
+        return self._deco_model_type
+
+    def model_settings(self) -> dict[str, Any]:
+        """The current (display) model settings."""
+        return dict(self._model_settings_display)
+
     def points(self) -> list[DivePoint]:
         return self._points
 

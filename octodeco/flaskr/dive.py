@@ -42,8 +42,15 @@ def get_gf_args_from_request():
         args.update(request.form);
         gflow = min(200, max(0, _get_arg_multikey(args, int, [ 'ipttxt_gflow', 'gflow'], 101)));
         gfhigh = min(200, max(0, _get_arg_multikey(args, int, [ 'ipttxt_gfhigh', 'gfhigh' ], 101)));
+        # Deco model selection + ratio deco parameters
+        model = args.get('model');
+        if model not in ('Buhlmann', 'RatioDeco'):
+            model = '';    # '' = the dive's own model
+        curve = args.get('curve');
+        if curve not in ('s-curve', 'exponential'):
+            curve = 's-curve';
         # Done
-        g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh };
+        g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh, 'model': model, 'curve': curve };
     return g.gf_args;
 
 
@@ -63,10 +70,52 @@ class CachedDiveProfile:
             return None;
         return dp;
 
+    def _selected_model(self, req_args):
+        if req_args.get('model') in ('Buhlmann', 'RatioDeco'):
+            return req_args['model'];
+        dp = self.profile_base();
+        return dp.deco_model_type() if dp is not None else 'Buhlmann';
+
+    def _model_settings_from_args(self, req_args, model_type):
+        dp = self.profile_base();
+        if model_type == 'RatioDeco':
+            return { 'curve_shape': req_args['curve'] };
+        gflow = req_args['gflow'];
+        gfhigh = req_args['gfhigh'];
+        if (gflow, gfhigh) == (101, 101):
+            gflow = dp.gf_low_display if dp.gf_low_display is not None else 35;
+            gfhigh = dp.gf_high_display if dp.gf_high_display is not None else 70;
+        return { 'gf_low': gflow, 'gf_high': gfhigh };
+
+    @cache.memoize()
+    def profile_plan(self, req_args, model_type):
+        # The dive replanned under the given model: same bottom phase, that
+        # model's stops. Returns None if replanning is not possible (eg an
+        # imported dive, or a gas the model does not support).
+        dp = self.profile_base();
+        if dp is None or dp.runtimetable() is None:
+            return None;
+        cp = dp.clean_copy();
+        # clean_copy drops database identity; the display layer needs it
+        cp.dive_id = dp.dive_id;
+        cp.user_id = dp.user_id;
+        cp._deco_model_type = model_type;
+        cp._model_settings_display = self._model_settings_from_args(req_args, model_type);
+        try:
+            cp.update_stops();
+        except Exception:
+            return None;
+        return cp;
+
     @cache.memoize()
     def profile_args(self, req_args):
+        # The profile to display: the selected model's plan where possible,
+        # otherwise the stored profile with display GFs applied (old
+        # behaviour; also what imported dives get).
+        dp = self.profile_plan(req_args, self._selected_model(req_args));
+        if dp is not None:
+            return dp;
         dp = self.profile_base();
-        # Gradient factors
         gflow = req_args['gflow'];
         gfhigh = req_args['gfhigh'];
         if dp is None:
@@ -81,11 +130,21 @@ class CachedDiveProfile:
     def user_id(self):
         return self.profile_base().user_id;
 
+    def stored_decotime(self):
+        dp = self.profile_base();
+        return dp.decotime() if dp is not None else 0.0;
+
     @cache.memoize()
     def plot_profile(self, req_args):
         dp = self.profile_args(req_args);
+        # Overlay the other model's plan depth for comparison
+        selected = self._selected_model(req_args);
+        other = 'RatioDeco' if selected == 'Buhlmann' else 'Buhlmann';
+        other_dp = self.profile_plan(req_args, other);
+        other_label = 'Ratio deco' if other == 'RatioDeco' else 'Bühlmann';
         try:
-            jp = plots.show_diveprofile(dp);
+            jp = plots.show_diveprofile(dp, other_profile = other_dp,
+                                        other_label = other_label);
         except TypeError:
             jp = {};
         return jsonify(jp);

@@ -235,18 +235,23 @@
     {
         var is_table_full_vis = $('#table_full').is(':visible');
         var is_pressure_graph_vis = $('#chart_pressure_graph').is(':visible');
+        var is_heatmap_vis = $('#chart_heatmap').is(':visible');
+        var is_gfdeco_vis = $('#table_gfdeco').is(':visible');
         // We load the diveprofile first, then the rest to benefit from caching (esp. with multiple workers present)
         spin_elt('#chart_diveprofile', true);
         spin_elt('#table_summary', true );
         if (is_table_full_vis) spin_elt('#table_full', true );
         if (is_pressure_graph_vis) spin_elt('#chart_pressure_graph', true );
+        if (is_heatmap_vis) spin_elt('#chart_heatmap', true );
         load_plot_diveprofile(function(){
             load_summary_table();
             if (is_table_full_vis) load_full_table(); else unload_full_table();
             if (is_pressure_graph_vis) load_pressure_graph(); else unload_pressure_graph();
+            // the displayed profile now depends on the selected deco model,
+            // so these need refreshing too
+            if (is_heatmap_vis) load_plot_heatmap(); else unload_plot_heatmap();
+            if (is_gfdeco_vis) load_gfdeco_table(); else gfdeco_table_loaded = false;
         });
-        // heatmap does not need to be redrawn, it's only dependent on profile, not on display GF
-        // same for gf_deco_table
     }
 
     /*
@@ -355,6 +360,23 @@
             <span id="show_gflow" class="changeable">hello</span>
             /
             <span id="show_gfhigh" class="changeable">world</span>
+        </div>
+        <div class="adjust">
+            <!-- Deco model switch + ratio deco parameters -->
+            Deco model:
+            {% set is_ratio = dive.deco_model_type() == 'RatioDeco' %}
+            <label><input type="radio" name="model" value="Buhlmann"
+                          {% if not is_ratio %}checked{% endif %}
+                          onchange="reload_all();"> B&uuml;hlmann</label>
+            <label><input type="radio" name="model" value="RatioDeco"
+                          {% if is_ratio %}checked{% endif %}
+                          onchange="reload_all();"> Ratio deco</label>
+            &nbsp; Ratio curve:
+            <select name="curve" id="ipt_curve" onchange="reload_all();">
+                {% set cur_curve = dive.model_settings().get('curve_shape', 's-curve') %}
+                <option value="s-curve" {% if cur_curve == 's-curve' %}selected{% endif %}>s-curve</option>
+                <option value="exponential" {% if cur_curve == 'exponential' %}selected{% endif %}>exponential</option>
+            </select>
         {% if modify_allowed %}
             <input type="submit" name="action" value="Update Stops">
         {% else %}
