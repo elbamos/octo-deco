@@ -21,6 +21,12 @@ def show_elt_plot_heatmap(dive_id):
     return cdp.plot_heatmap(dive.get_gf_args_from_request());
 
 
+@bp.route('/show/<string:dive_id>/plan_status', methods = ['GET'])
+def show_elt_plan_status(dive_id):
+    cdp = dive.get_cached_dive(dive_id, user.get_user_details().user_id());
+    return cdp.plan_status_html(dive.get_gf_args_from_request());
+
+
 @bp.route('/show/<string:dive_id>/summary', methods = ['GET'])
 def show_elt_summary_table(dive_id):
     cdp = dive.get_cached_dive(dive_id, user.get_user_details().user_id());

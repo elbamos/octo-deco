@@ -5,6 +5,7 @@ import pandas;
 from flask import (
     g, Blueprint, flash, redirect, url_for, request, abort, jsonify, session
 )
+from markupsafe import escape;
 
 from . import app, plots, user, db_api_dive;
 from .util.features import AllowedFeature as uft;
@@ -88,13 +89,15 @@ class CachedDiveProfile:
         return { 'gf_low': gflow, 'gf_high': gfhigh };
 
     @cache.memoize()
-    def profile_plan(self, req_args, model_type):
+    def _plan_result(self, req_args, model_type):
         # The dive replanned under the given model: same bottom phase, that
-        # model's stops. Returns None if replanning is not possible (eg an
-        # imported dive, or a gas the model does not support).
+        # model's stops. Returns (profile, None), or (None, error message)
+        # when replanning is not possible (eg a gas the model does not
+        # support), or (None, None) for dives that should not be replanned
+        # at all (imported dives).
         dp = self.profile_base();
         if dp is None or dp.runtimetable() is None:
-            return None;
+            return (None, None);
         cp = dp.clean_copy();
         # clean_copy drops database identity; the display layer needs it
         cp.dive_id = dp.dive_id;
@@ -103,9 +106,22 @@ class CachedDiveProfile:
         cp._model_settings_display = self._model_settings_from_args(req_args, model_type);
         try:
             cp.update_stops();
-        except Exception:
-            return None;
-        return cp;
+        except Exception as err:
+            return (None, str(err) or type(err).__name__);
+        return (cp, None);
+
+    def profile_plan(self, req_args, model_type):
+        return self._plan_result(req_args, model_type)[ 0 ];
+
+    def plan_status_html(self, req_args):
+        # Short HTML note about plans that could not be computed; empty if
+        # all is well.
+        msgs = [];
+        for model_type, label in ( ('Buhlmann', 'B&uuml;hlmann'), ('RatioDeco', 'Ratio deco') ):
+            _, err = self._plan_result(req_args, model_type);
+            if err is not None:
+                msgs.append(f'No {label} plan: {escape(err)}');
+        return '<br/>'.join(msgs);
 
     @cache.memoize()
     def profile_args(self, req_args):

@@ -166,7 +166,10 @@ class RatioDeco(DecompressionModel):
             return (remaining, p_ceiling, state)
 
         if p_target != Util.SURFACE_PRESSURE:
-           raise ValueError('Ratio Deco only works at sea level')
+            # A mid-dive ascent target (eg between levels of a multilevel
+            # dive): ratio deco only plans the final ascent to the surface,
+            # so no stops are required here.
+            return ([], p_target, state)
 
         # deco_info calls this for every point, including the pre-descent
         # surface points: nothing to decompress yet.
@@ -276,7 +279,9 @@ class RatioDeco(DecompressionModel):
             return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
         elif point.max_depth() <= 51:
             # Deco at 1:1 ratio
-            assert bottom_gas == Gas.Trimix(30, 30) or bottom_gas == Gas.Trimix(18, 45)
+            if not (bottom_gas == Gas.Trimix(30, 30) or bottom_gas == Gas.Trimix(18, 45)):
+                raise ValueError(f'ratio deco between 30 m and 51 m requires '
+                                 f'bottom gas Tx30/30 or Tx18/45; this dive uses {bottom_gas}')
 
             deco_time = point.bottomtime()
             avg_depth_m = point.avg_depth_bottom()
@@ -290,7 +295,9 @@ class RatioDeco(DecompressionModel):
             return (stops, Util.depth_to_Pamb(21), commit(stops))
         elif point.max_depth() <= 72:
             # Deco at 1:2 ratio
-            assert bottom_gas == Gas.Trimix(18, 45) or bottom_gas == Gas.Trimix(15, 55)
+            if not (bottom_gas == Gas.Trimix(18, 45) or bottom_gas == Gas.Trimix(15, 55)):
+                raise ValueError(f'ratio deco between 51 m and 72 m requires '
+                                 f'bottom gas Tx18/45 or Tx15/55; this dive uses {bottom_gas}')
 
             deco_time = point.bottomtime() * 2
             avg_depth_m = point.avg_depth_bottom()
@@ -303,7 +310,7 @@ class RatioDeco(DecompressionModel):
             stops = generate_deep_stops(21) + generate_curve(21, 9, time_21_09) + generate_final_stops(time_06_03)
             return (stops, Util.depth_to_Pamb(21), commit(stops))
         else:
-            raise NotImplementedError()
+            raise NotImplementedError('ratio deco is not implemented for dives beyond 72 m')
 
 
     def deco_info(self, point: DivePoint, gases_carried: Iterable[Gas.Gas],

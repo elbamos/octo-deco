@@ -94,6 +94,12 @@
         });
     }
 
+    function load_plan_status()
+    {
+        $('#plan_status').load(
+            "{{url_for('dive.show_elt_plan_status', dive_id=dive.dive_id)}}?" + get_args_url_params());
+    }
+
     var plot_heatmap_loaded = false;
     function load_plot_heatmap()
     {
@@ -245,6 +251,7 @@
         if (is_heatmap_vis) spin_elt('#chart_heatmap', true );
         load_plot_diveprofile(function(){
             load_summary_table();
+            load_plan_status();
             if (is_table_full_vis) load_full_table(); else unload_full_table();
             if (is_pressure_graph_vis) load_pressure_graph(); else unload_pressure_graph();
             // the displayed profile now depends on the selected deco model,
@@ -383,6 +390,7 @@
             <input type="submit" name="action" value="Duplicate dive">
         {% endif %}
         </div>
+        <div class="adjust" id="plan_status" style="color:#a03030;"></div>
     </form>
 
     <!--
