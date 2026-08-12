@@ -209,6 +209,34 @@ class CachedDiveProfile:
         return dsdf_table;
 
     @cache.memoize()
+    def deco_plan_table(self, req_args):
+        # The executed deco stops of the displayed profile: one row per
+        # (depth, gas) dwell, aggregated from the profile's deco points.
+        dp = self.profile_args(req_args);
+        imperial = units.is_imperial(req_args);
+        du = units.depth_unit(imperial);
+        rows = [];
+        for p in dp.points():
+            if not p.is_deco_stop or p.depth <= 0 or p.duration <= 0:
+                continue;
+            if p.prev is None or abs(p.prev.depth - p.depth) > 0.01:
+                # Travel between stops, not time spent at one
+                continue;
+            if len(rows) > 0 and abs(rows[-1]['depth'] - p.depth) < 0.01 \
+                    and rows[-1]['gas'] == p.gas:
+                rows[-1]['duration'] += p.duration;
+            else:
+                rows.append({'depth': p.depth, 'duration': p.duration, 'gas': p.gas});
+        if len(rows) == 0:
+            return 'No decompression stops.';
+        dsdf = pandas.DataFrame([
+            {'depth ({})'.format(du): '{:.0f}'.format(units.depth(r['depth'], imperial)),
+             'duration (min)': '{:.1f}'.format(r['duration']),
+             'gas': str(r['gas'])}
+            for r in rows]);
+        return dsdf.to_html(classes="smalltable", header="true", index=False);
+
+    @cache.memoize()
     def runtime_table(self, req_args):
         dp = self.profile_args(req_args);
         rtt = dp.runtimetable();
