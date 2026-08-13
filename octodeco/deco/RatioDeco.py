@@ -328,6 +328,14 @@ class RatioDeco(DecompressionModel):
                     stops.append(Stop(second_stop, duration_50(), point.gas, self.ascent_speed))
             return stops
 
+        def lost_gas_factor(depth: float) -> int:
+            """RD 1.0 lost-gas rule: a deco segment whose deco gas is not
+            carried is done on backgas for twice the time. (The gas
+            consumption analysis relies on this: its lost-gas scenarios
+            replan the dive with a deco gas removed.)"""
+            best = Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco)
+            return 2 if best == bottom_gas else 1
+
         ndl = self._NDL(point, state=state)
         if ndl > 0:
             # If we're under the NDL, perform min deco
@@ -369,8 +377,8 @@ class RatioDeco(DecompressionModel):
             n = math.ceil(abs(diff) / 3)
             intervals = n if diff >= 0  else -n
             deco_time += intervals * 5
-            time_21_09 = math.ceil(deco_time / 2)
-            time_06_03 = math.ceil(deco_time / 2)
+            time_21_09 = math.ceil(deco_time / 2) * lost_gas_factor(21)
+            time_06_03 = math.ceil(deco_time / 2) * lost_gas_factor(6)
             stops = self._insert_gas_switches(
                 generate_deep_stops(21) + generate_curve(21, 9, time_21_09)
                 + generate_final_stops(time_06_03), bottom_gas)
@@ -393,8 +401,8 @@ class RatioDeco(DecompressionModel):
             # the 36-24 m range ("Do 1/2 of nitrox 50 time in 120'/36m -
             # 80'/24m range"). Deep stops only apply above the 36 m
             # segment, which supersedes the 50%-depth stop.
-            time_21_09 = math.ceil(deco_time / 2)
-            time_o2 = math.ceil(deco_time / 2)
+            time_21_09 = math.ceil(deco_time / 2) * lost_gas_factor(21)
+            time_o2 = math.ceil(deco_time / 2) * lost_gas_factor(6)
             time_36_24 = math.ceil(time_21_09 / 2)
             o2_stop = [Stop(6, time_o2,
                             Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco),
