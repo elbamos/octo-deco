@@ -283,10 +283,9 @@ class RatioDeco(DecompressionModel):
             generate_curve = generate_expo_curve
 
         def generate_final_stops(duration: int) -> List[Stop]:
-            # TODO: What's the right ratio for 20 and 10' stops.
             return [
-                Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed),
-                Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed)
+                Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2),
+                Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed / 2)
             ]
 
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
