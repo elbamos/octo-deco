@@ -50,6 +50,10 @@ class RatioDecoState:
 class RatioDeco(DecompressionModel):
     MODEL_TYPE = 'RatioDeco'
 
+    # Min-deco air NDL by average depth (m), from the 5thD-X 2005 outline.
+    _NDL_TABLE = {12: 170, 15: 60, 18: 50, 21: 35, 24: 30, 27: 25,
+                  30: 20, 33: 15, 36: 10, 39: 5}
+
     def __init__(self,
                  descent_speed: float = 6,
                  curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
@@ -107,17 +111,15 @@ class RatioDeco(DecompressionModel):
         bottom_time = point.bottomtime()
         effective_avg_depth_meters = avg_bottom_depth_meters * gas_multiplier
 
-        if effective_avg_depth_meters < 24:
-            return 110 - (effective_avg_depth_meters * 3) - bottom_time
-        elif effective_avg_depth_meters < 30:
-            return 20 - bottom_time
-        elif effective_avg_depth_meters < 33:
-            return 15 - bottom_time
-        elif effective_avg_depth_meters < 36:
-            return 10 - bottom_time
-        elif effective_avg_depth_meters < 39:
-            return 5 - bottom_time
-        return 0
+        # The 5thD-X/UTD min-deco air table, entered with the effective
+        # average depth rounded up (conservative) to the next 3 m row.
+        # The 21-39 m rows follow the "100'/30m = 20 min, +/-5 min per
+        # 10'/3m" line; the shallower rows are the table's own departures
+        # from that line.
+        row = max(12, 3 * math.ceil(effective_avg_depth_meters / 3))
+        if row > 39:
+            return 0
+        return self._NDL_TABLE[row] - bottom_time
 
 
 
@@ -156,6 +158,28 @@ class RatioDeco(DecompressionModel):
                 result.append(Stop(s.depth, self.gas_switch_mins, current_gas))
                 current_gas = s.gas
             result.append(s)
+        return result
+
+    def _apply_O2_breaks(self, stops: List[Stop], back_gas: Gas.Gas) -> List[Stop]:
+        """RD 1.0 oxygen-break cycling: an O2 stop longer than 20 minutes
+        is taken as cycles of 12 minutes on O2 and 6 minutes on backgas;
+        the breaks count toward the stop time (a plain 15-20 minute O2
+        stop needs no break)."""
+        o2 = Gas.Nitrox(99)
+        result: List[Stop] = []
+        for s in stops:
+            if s.gas != o2 or s.duration <= 20:
+                result.append(s)
+                continue
+            remaining = s.duration
+            while remaining > 0:
+                on = min(12, remaining)
+                result.append(Stop(s.depth, on, o2, s.ascent_speed))
+                remaining -= on
+                if remaining > 0:
+                    off = min(6, remaining)
+                    result.append(Stop(s.depth, off, back_gas, s.ascent_speed))
+                    remaining -= off
         return result
 
     def compute_deco_profile(self, point: DivePoint, gases: Iterable[Gas.Gas],
@@ -207,39 +231,48 @@ class RatioDeco(DecompressionModel):
             ascent_begun = len(bottom_points) == 0 or bottom_points[-1] is not point
             return RatioDecoState(stops) if ascent_begun else state
 
-        def add_stop(stops: List[Stop], depth: float, duration: float):
-            new_stop = Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
-            stops.append(new_stop)
-
         def generate_min_stops() -> List[Stop]:
             min_stops = []
 
             stop_depth = 3 * math.ceil(point.max_depth() / 2 / 3)
             while stop_depth >= self.last_stop_depth:
-                add_stop(min_stops, stop_depth, 0.5)
+                gas_to_use = Gas.best_gas(gases, Util.depth_to_Pamb(stop_depth), self.max_pO2_deco)
+                ascent_speed = self.ascent_speed if stop_depth > 6 else self.ascent_speed / 2
+
+                new_stop = Stop(stop_depth, 0.5, gas_to_use, ascent_speed)
+                min_stops.append(new_stop)
+
                 stop_depth -= 3
 
             return min_stops
 
         def generate_s_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
-            stops = [math.ceil(duration / 5)] * 5
-            time_to_distribute = stops[-2]
-            stops[-2] = stops[-3] = math.ceil(stops[-2] / 2)
-            stops[0] = stops[1] = math.ceil(stops[0] + (time_to_distribute / 2))
+            # RD 1.0 S-curve: start from the linear split, halve the two
+            # middle stops (rounding up), push the time taken from them to
+            # the two deepest stops, and let the shallowest stop absorb the
+            # rounding so the segment total stays exact. Matches the worked
+            # examples in the 2005/2008 source material:
+            # 15 min -> 4/4/2/2/3, 24 min -> 7/7/3/3/4.
+            base = math.ceil(duration / 5)
+            deep = base + math.floor(base / 2)
+            mid = math.ceil(base / 2)
+            shallow = max(1, duration - 2 * deep - 2 * mid)
+            stops = [deep, deep, mid, mid, shallow]
 
             return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
                     for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
 
         def generate_expo_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
-            stops = [math.ceil(duration / 5)] * 5
-            old_stop_1 = stops[1]
-            stops[1] = math.ceil(stops[1] / 2)
-            time_to_distribute = stops[1] - old_stop_1
-            old_stop_0 = stops[0]
-            stops[0] = math.ceil(stops[1] / 2)
-            time_to_distribute += stops[0] - old_stop_0
-            stops[3] = math.ceil(stops[3] + time_to_distribute / 2)
-            stops[4] = math.ceil(stops[4] + time_to_distribute / 2)
+            # RD 1.0 exponential shape: each stop longer than the one
+            # before, built by halving time off the two deepest stops and
+            # moving it to the shallow end (eg 15 min -> 1/2/3/4/5).
+            base = math.ceil(duration / 5)
+            second = math.ceil(base / 2)
+            deepest = math.ceil(second / 2)
+            taken = (base - deepest) + (base - second)
+            stops = [deepest, second, base,
+                     base + math.floor(taken / 2),
+                     base + math.ceil(taken / 2)]
 
             return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
                     for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
@@ -257,17 +290,43 @@ class RatioDeco(DecompressionModel):
             ]
 
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
-            duration = point.bottomtime()
+            # Durations from the 5thD-X deep-stop table, keyed to exposure
+            # past the NDL (~ bottom time in the ratio zones, where the
+            # table NDL is 0-5 min): 75% stops run 1..5 min and 50% stops
+            # 1..10 min, with a 1-minute minimum at each.
+            past_ndl = point.bottomtime()
+
+            def duration_75() -> float:
+                if past_ndl < 30:
+                    return 1
+                if past_ndl < 60:
+                    return 2
+                if past_ndl < 120:
+                    return 3
+                if past_ndl < 150:
+                    return 4
+                return 5
+
+            def duration_50() -> float:
+                if past_ndl < 30:
+                    return 1
+                if past_ndl < 60:
+                    return 3
+                if past_ndl < 90:
+                    return 5
+                if past_ndl < 120:
+                    return 7
+                if past_ndl < 150:
+                    return 9
+                return 10
+
             stops = []
             first_stop = 3 * math.floor(point.max_depth() * 0.75 / 3 + 0.5)
             if first_stop > gas_switch_depth_m:
-                stop_duration = math.floor(duration / 30)
-                if stop_duration > 0:
-                    stops.append(Stop(first_stop, stop_duration, point.gas, self.ascent_speed))
+                stops.append(Stop(first_stop, duration_75(), point.gas, self.ascent_speed))
                 second_stop = 3 * math.floor(point.max_depth() * 0.5 / 3 + 0.5)
                 if second_stop > gas_switch_depth_m:
-                    stop_duration = 1 + (2 * math.floor(duration / 30))
-                    stops.append(Stop(second_stop, stop_duration, point.gas, self.ascent_speed))
+                    stops.append(Stop(second_stop, duration_50(), point.gas, self.ascent_speed))
             return stops
 
         ndl = self._NDL(point, state=state)
@@ -280,8 +339,15 @@ class RatioDeco(DecompressionModel):
         elif point.max_depth() <= 30:
             # If we have to decompress but we're under 100',
             # we add to the final stop an amount of time equal
-            # to how far over the NDL we are
-            deco_time_to_distribue = - math.ceil(ndl)
+            # to how far over the NDL we are.
+            # This tool is only endorsed up to 20 minutes past the NDL
+            # ("Only add the Normal Min Deco ascent times when exceeding
+            # the N.D.L. by 20 min or less").
+            if -ndl > 20:
+                raise ValueError(f'ratio deco extended deco covers at most 20 '
+                                 f'minutes past the NDL; this dive is '
+                                 f'{-ndl:.0f} minutes over')
+            deco_time_to_distribue = - math.floor(ndl)
             stops = generate_min_stops()
             has_O2 = Gas.best_gas(gases, Util.depth_to_Pamb(3), 1.6) == Gas.Nitrox(99)
             if has_O2:
@@ -293,10 +359,10 @@ class RatioDeco(DecompressionModel):
             stops = self._insert_gas_switches(stops, bottom_gas)
             return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
         elif point.max_depth() <= 51:
-            # Deco at 1:1 ratio
-            if not (bottom_gas == Gas.Trimix(30, 30) or bottom_gas == Gas.Trimix(18, 45)):
+            # Deco at 1:1 ratio (zone gases: 21/35 or 18/45)
+            if not (bottom_gas == Gas.Trimix(21, 35) or bottom_gas == Gas.Trimix(18, 45)):
                 raise ValueError(f'ratio deco between 30 m and 51 m requires '
-                                 f'bottom gas Tx30/30 or Tx18/45; this dive uses {bottom_gas}')
+                                 f'bottom gas Tx21/35 or Tx18/45; this dive uses {bottom_gas}')
 
             deco_time = point.bottomtime()
             avg_depth_m = point.avg_depth_bottom()
@@ -309,6 +375,7 @@ class RatioDeco(DecompressionModel):
             stops = self._insert_gas_switches(
                 generate_deep_stops(21) + generate_curve(21, 9, time_21_09)
                 + generate_final_stops(time_06_03), bottom_gas)
+            stops = self._apply_O2_breaks(stops, bottom_gas)
             return (stops, Util.depth_to_Pamb(21), commit(stops))
         elif point.max_depth() <= 72:
             # Deco at 1:2 ratio
@@ -322,12 +389,22 @@ class RatioDeco(DecompressionModel):
             n = math.ceil(abs(diff) / 3)
             intervals = n if diff >= 0 else -n
             deco_time += intervals * 5
+            # Half the ratio time at 21-9 m on Nitrox 50, half on O2 at
+            # 6 m; on top of that, half the Nx50 segment's time again in
+            # the 36-24 m range ("Do 1/2 of nitrox 50 time in 120'/36m -
+            # 80'/24m range"). Deep stops only apply above the 36 m
+            # segment, which supersedes the 50%-depth stop.
             time_21_09 = math.ceil(deco_time / 2)
-            time_06_03 = math.ceil(deco_time / 2)
+            time_o2 = math.ceil(deco_time / 2)
+            time_36_24 = math.ceil(time_21_09 / 2)
+            o2_stop = [Stop(6, time_o2,
+                            Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco),
+                            self.ascent_speed)]
             stops = self._insert_gas_switches(
-                generate_deep_stops(21) + generate_curve(21, 9, time_21_09)
-                + generate_final_stops(time_06_03), bottom_gas)
-            return (stops, Util.depth_to_Pamb(21), commit(stops))
+                generate_deep_stops(36) + generate_curve(36, 24, time_36_24)
+                + generate_curve(21, 9, time_21_09) + o2_stop, bottom_gas)
+            stops = self._apply_O2_breaks(stops, bottom_gas)
+            return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
         else:
             raise NotImplementedError('ratio deco is not implemented for dives beyond 72 m')
 
