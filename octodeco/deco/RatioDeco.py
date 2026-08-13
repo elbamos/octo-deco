@@ -291,41 +291,20 @@ class RatioDeco(DecompressionModel):
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
             # Durations from the 5thD-X deep-stop table, keyed to exposure
             # past the NDL (~ bottom time in the ratio zones, where the
-            # table NDL is 0-5 min): 75% stops run 1..5 min and 50% stops
-            # 1..10 min, with a 1-minute minimum at each.
-            past_ndl = point.bottomtime()
-
-            def duration_75() -> float:
-                if past_ndl < 30:
-                    return 1
-                if past_ndl < 60:
-                    return 2
-                if past_ndl < 120:
-                    return 3
-                if past_ndl < 150:
-                    return 4
-                return 5
-
-            def duration_50() -> float:
-                if past_ndl < 30:
-                    return 1
-                if past_ndl < 60:
-                    return 3
-                if past_ndl < 90:
-                    return 5
-                if past_ndl < 120:
-                    return 7
-                if past_ndl < 150:
-                    return 9
-                return 10
+            # table NDL is 0-5 min): per 30-minute block of exposure, the
+            # 75% stop grows 1 minute (1..5) and the 50% stop 2 minutes
+            # (1, 3, 5, 7, 9, capped at 10).
+            blocks = math.floor(point.bottomtime() / 30)
+            duration_75 = min(5, 1 + blocks)
+            duration_50 = min(10, 1 + 2 * blocks)
 
             stops = []
             first_stop = 3 * math.floor(point.max_depth() * 0.75 / 3 + 0.5)
             if first_stop > gas_switch_depth_m:
-                stops.append(Stop(first_stop, duration_75(), point.gas, self.ascent_speed))
+                stops.append(Stop(first_stop, duration_75, point.gas, self.ascent_speed))
                 second_stop = 3 * math.floor(point.max_depth() * 0.5 / 3 + 0.5)
                 if second_stop > gas_switch_depth_m:
-                    stops.append(Stop(second_stop, duration_50(), point.gas, self.ascent_speed))
+                    stops.append(Stop(second_stop, duration_50, point.gas, self.ascent_speed))
             return stops
 
         def lost_gas_factor(depth: float) -> int:
