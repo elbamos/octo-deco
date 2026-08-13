@@ -50,10 +50,6 @@ class RatioDecoState:
 class RatioDeco(DecompressionModel):
     MODEL_TYPE = 'RatioDeco'
 
-    # Min-deco air NDL by average depth (m), from the 5thD-X 2005 outline.
-    _NDL_TABLE = {12: 170, 15: 60, 18: 50, 21: 35, 24: 30, 27: 25,
-                  30: 20, 33: 15, 36: 10, 39: 5}
-
     def __init__(self,
                  descent_speed: float = 6,
                  curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
@@ -113,13 +109,17 @@ class RatioDeco(DecompressionModel):
 
         # The 5thD-X/UTD min-deco air table, entered with the effective
         # average depth rounded up (conservative) to the next 3 m row.
-        # The 21-39 m rows follow the "100'/30m = 20 min, +/-5 min per
-        # 10'/3m" line; the shallower rows are the table's own departures
-        # from that line.
-        row = max(12, 3 * math.ceil(effective_avg_depth_meters / 3))
+        # From 21 m down it is the documented rule "100'/30m = 20 min,
+        # +/-5 min per 10'/3m"; the three shallow rows are the table's
+        # own departures from that line.
+        row = 3 * math.ceil(effective_avg_depth_meters / 3)
         if row > 39:
             return 0
-        return self._NDL_TABLE[row] - bottom_time
+        if row >= 21:
+            limit = 20 - (row - 30) * 5 / 3
+        else:
+            limit = {18: 50, 15: 60}.get(row, 170)
+        return limit - bottom_time
 
 
 
