@@ -133,13 +133,17 @@ class RatioDeco(DecompressionModel):
         o2_map = {(12, 6): (12, 6), '12_6': (12, 6), (10, 5): (10, 5), '10_5': (10, 5)}
         if settings.get('o2_break_cycle', '') in o2_map:
             m.o2_break_cycle = o2_map[settings['o2_break_cycle']]
+        lsd_map = {3: 3, '3': 3, 6: 6, '6': 6}
+        if settings.get('last_stop_depth', '') in lsd_map:
+            m.last_stop_depth = lsd_map[settings['last_stop_depth']]
         return m
 
     def settings(self) -> dict[str, Any]:
         return {'curve_shape': self.curve_shape,
                 'first_deep_stop': self.first_deep_stop,
                 'second_deep_stop': self.second_deep_stop,
-                'o2_break_cycle': self.o2_break_cycle}
+                'o2_break_cycle': self.o2_break_cycle,
+                'last_stop_depth': self.last_stop_depth}
 
     def _matching_version(self) -> int | None:
         """The published version these options correspond to, if any

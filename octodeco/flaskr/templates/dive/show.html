@@ -425,6 +425,12 @@
                 <option value="12_6" {% if cur_o2 != (10, 5) %}selected{% endif %}>12/6</option>
                 <option value="10_5" {% if cur_o2 == (10, 5) %}selected{% endif %}>10/5</option>
             </select>
+            &nbsp; Last stop:
+            {% set cur_lsd = ms.get('last_stop_depth', 3) %}
+            <select name="lsd" id="ipt_lsd" onchange="reload_all();">
+                <option value="3" {% if cur_lsd == 3 %}selected{% endif %}>3 m / 10 ft</option>
+                <option value="6" {% if cur_lsd == 6 %}selected{% endif %}>6 m / 20 ft</option>
+            </select>
             &nbsp;
             <input type="button" value="RD 1.0" onclick="set_rd_version(1);">
             <input type="button" value="RD 2.0" onclick="set_rd_version(2);">

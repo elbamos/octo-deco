@@ -59,6 +59,9 @@ def get_gf_args_from_request():
         o2cycle = args.get('o2cycle');
         if o2cycle not in ('12_6', '10_5'):
             o2cycle = '';
+        lsd = args.get('lsd');
+        if lsd not in ('3', '6'):
+            lsd = '';
         # Display units; remembered in the session so the choice sticks
         # across dives and page loads.
         u = args.get('units');
@@ -68,7 +71,8 @@ def get_gf_args_from_request():
             u = session.get('units', 'metric');
         # Done
         g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh, 'model': model, 'curve': curve,
-                      'fds': fds, 'sds': sds, 'o2cycle': o2cycle, 'units': u };
+                      'fds': fds, 'sds': sds, 'o2cycle': o2cycle, 'lsd': lsd,
+                      'units': u };
     return g.gf_args;
 
 
@@ -101,7 +105,8 @@ class CachedDiveProfile:
             return { 'curve_shape': req_args['curve'],
                      'first_deep_stop': req_args['fds'],
                      'second_deep_stop': req_args['sds'],
-                     'o2_break_cycle': req_args['o2cycle'] };
+                     'o2_break_cycle': req_args['o2cycle'],
+                     'last_stop_depth': req_args['lsd'] };
         gflow = req_args['gflow'];
         gfhigh = req_args['gfhigh'];
         if (gflow, gfhigh) == (101, 101):

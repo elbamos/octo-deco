@@ -11,6 +11,25 @@ from octodeco.deco import Util;
 from . import units;
 
 
+def _depth_hover_texts(diveprofile):
+    # One text per profile point: the gas breathed, plus the total dwell
+    # at this depth when the point belongs to a deco stop.
+    pts = diveprofile.points();
+    texts = [ '' ] * len(pts);
+    i = 0;
+    while i < len(pts):
+        j = i;
+        while j + 1 < len(pts) and abs(pts[j + 1].depth - pts[i].depth) < 0.01:
+            j += 1;
+        is_stop = pts[i].depth > 0 and any(p.is_deco_stop for p in pts[i:j + 1]);
+        dwell = pts[j].time - pts[i].time;
+        for k in range(i, j + 1):
+            texts[k] = str(pts[k].gas) + \
+                (', stop {:.1f}min'.format(dwell) if is_stop and dwell > 0 else '');
+        i = j + 1;
+    return texts;
+
+
 def show_diveprofile(diveprofile, other_profile = None, other_label = None,
                      imperial = False):
     df = diveprofile.dataframe();
@@ -82,8 +101,27 @@ def show_diveprofile(diveprofile, other_profile = None, other_label = None,
                   secondary_y = True);
     # Depth
     fig.add_trace(go.Scatter(x = df[ "time" ], y = dconv * df[ "depth" ], name = 'Depth',
-                             hovertemplate = 'Depth: %{y:.1f}' + du + ' @ %{x:.1f}mins<extra></extra>',
+                             customdata = _depth_hover_texts(diveprofile),
+                             hovertemplate = 'Depth: %{y:.1f}' + du + ' @ %{x:.1f}mins' +
+                                             '<br>%{customdata}<extra></extra>',
                              line = {'color': 'rgb(30,7,143)', 'width': 3}));
+    # Gas switches, as markers on the depth line
+    sw_x, sw_y, sw_text = [], [], [];
+    prev = None;
+    for p in diveprofile.points():
+        if prev is not None and p.gas != prev.gas and p.depth > 0:
+            sw_x.append(p.time);
+            sw_y.append(dconv * p.depth);
+            sw_text.append('{} &#8594; {}'.format(prev.gas, p.gas));
+        prev = p;
+    if len(sw_x) > 0:
+        fig.add_trace(go.Scatter(x = sw_x, y = sw_y, name = 'Gas switch',
+                                 mode = 'markers',
+                                 marker = {'symbol': 'diamond', 'size': 9,
+                                           'color': 'rgb(214,86,23)'},
+                                 customdata = sw_text,
+                                 hovertemplate = '%{customdata} @ %{x:.1f}mins, %{y:.1f}' +
+                                                 du + '<extra></extra>'));
     # Leading tissue -> not that interesting
     # fig.add_trace( go.Scatter( x=df["time"], y=(100/16)*(df["LeadingTissueIndex"]+2), name='Leading tissue',
     #                            line={'color': 'rgb(251,165,56)', 'dash': 'dot', 'width': 1} ),
