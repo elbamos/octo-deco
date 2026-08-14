@@ -53,20 +53,17 @@ class RatioDeco(DecompressionModel):
     def __init__(self,
                  descent_speed: float = 6,
                  curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
-                 max_pO2_deco: float = 1.6, gas_switch_mins: float = .5,
-                 last_stop_depth: float = 3):
+                 gas_switch_mins: float = .5,
+                 last_stop_depth: float = Literal[6, 3]):
         super().__init__()
         self.descent_speed = descent_speed
         # In deco, every 3 m of ascent takes 30 seconds; combined with the
         # standard 30-second stops, each 3 m increment costs one minute.
         self.ascent_speed = 6
-        self.max_pO2_deco = max_pO2_deco
+        self.max_pO2_deco = 1.6
         self.gas_switch_mins = gas_switch_mins
         self.last_stop_depth = last_stop_depth
         self.curve_shape = curve_shape
-        # TODO: ratio deco configuration (eg the ratio, reference depth,
-        # ascent shape parameters). Whatever is added here should also be
-        # reflected in settings() / for_profile() so it round-trips.
 
     #
     # The DecompressionModel interface
@@ -283,10 +280,15 @@ class RatioDeco(DecompressionModel):
             generate_curve = generate_expo_curve
 
         def generate_final_stops(duration: int) -> List[Stop]:
-            return [
-                Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2),
-                Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed / 2)
-            ]
+            if self.last_stop_depth == 3:
+                return [
+                    Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2),
+                    Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed / 2)
+                ]
+            else:
+                return [
+                    Stop(6, duration, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2)
+                ]
 
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
             # Durations from the 5thD-X deep-stop table, keyed to exposure
