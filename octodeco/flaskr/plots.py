@@ -12,14 +12,17 @@ from . import units;
 
 
 def _depth_hover_texts(diveprofile):
-    # One text per profile point: the gas breathed, plus the total dwell
-    # at this depth when the point belongs to a deco stop.
+    # One text per profile point: the gas breathed, plus the dwell on that
+    # gas when the point belongs to a deco stop. Runs are broken at gas
+    # changes, so a stop containing a gas switch reports each gas's own
+    # share of the stop rather than the whole stop for both.
     pts = diveprofile.points();
     texts = [ '' ] * len(pts);
     i = 0;
     while i < len(pts):
         j = i;
-        while j + 1 < len(pts) and abs(pts[j + 1].depth - pts[i].depth) < 0.01:
+        while j + 1 < len(pts) and abs(pts[j + 1].depth - pts[i].depth) < 0.01 \
+                and pts[j + 1].gas == pts[i].gas:
             j += 1;
         is_stop = pts[i].depth > 0 and any(p.is_deco_stop for p in pts[i:j + 1]);
         dwell = pts[j].time - pts[i].time;
