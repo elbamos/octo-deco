@@ -50,6 +50,15 @@ def get_gf_args_from_request():
         curve = args.get('curve');
         if curve not in ('s_curve_deep', 's_curve_shallow', 'exponential'):
             curve = '';    # '' = the ratio deco version's own default shape
+        fds = args.get('fds');
+        if fds not in ('75', '66', 'none'):
+            fds = '';
+        sds = args.get('sds');
+        if sds not in ('50', 'none'):
+            sds = '';
+        o2cycle = args.get('o2cycle');
+        if o2cycle not in ('12_6', '10_5'):
+            o2cycle = '';
         # Display units; remembered in the session so the choice sticks
         # across dives and page loads.
         u = args.get('units');
@@ -59,7 +68,7 @@ def get_gf_args_from_request():
             u = session.get('units', 'metric');
         # Done
         g.gf_args = { 'gflow': gflow, 'gfhigh': gfhigh, 'model': model, 'curve': curve,
-                      'units': u };
+                      'fds': fds, 'sds': sds, 'o2cycle': o2cycle, 'units': u };
     return g.gf_args;
 
 
@@ -88,7 +97,11 @@ class CachedDiveProfile:
     def _model_settings_from_args(self, req_args, model_type):
         dp = self.profile_base();
         if model_type == 'RatioDeco':
-            return { 'curve_shape': req_args['curve'] };
+            # Unset ('') options keep the model's version-1 defaults
+            return { 'curve_shape': req_args['curve'],
+                     'first_deep_stop': req_args['fds'],
+                     'second_deep_stop': req_args['sds'],
+                     'o2_break_cycle': req_args['o2cycle'] };
         gflow = req_args['gflow'];
         gfhigh = req_args['gfhigh'];
         if (gflow, gfhigh) == (101, 101):

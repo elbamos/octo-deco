@@ -77,7 +77,6 @@ class RatioDeco(DecompressionModel):
         self.first_deep_stop = first_deep_stop
         self.second_deep_stop = second_deep_stop
         self.o2_break_cycle = o2_break_cycle
-        self.version = 1
 
     # The options making up each published version of ratio deco: 2.0
     # moved the first deep stop from 75% to 66% of depth and pushes the
@@ -105,11 +104,9 @@ class RatioDeco(DecompressionModel):
         preset = dict(cls._VERSION_PRESETS[version])
         if curve_shape is not None:
             preset['curve_shape'] = curve_shape
-        instance = cls(gas_switch_mins=gas_switch_mins,
-                       last_stop_depth=last_stop_depth,
-                       **preset)
-        instance.version = version
-        return instance
+        return cls(gas_switch_mins=gas_switch_mins,
+                   last_stop_depth=last_stop_depth,
+                   **preset)
 
     #
     # The DecompressionModel interface
@@ -118,35 +115,68 @@ class RatioDeco(DecompressionModel):
     def for_profile(cls, diveprofile: DiveProfile,
                     settings: dict[str, Any]) -> RatioDeco:
         # Ratio deco is a standardized procedure: it brings its own ascent
-        # speeds and stop depths rather than taking them from the dive, so
-        # only the version and curve shape are configurable. Legacy
-        # settings ('s-curve', or no curve at all) fall back to the
-        # version's own S-curve flavor.
+        # speeds and stop depths rather than taking them from the dive;
+        # the configurable options arrive as strings from the UI or as
+        # real values from settings(). Anything absent or unrecognized
+        # keeps the version preset (legacy settings carry a 'version' key;
+        # its curve falls back to that version's own S-curve flavor).
         curve = settings.get('curve_shape')
         if curve not in ('exponential', 's_curve_deep', 's_curve_shallow'):
             curve = None
-        return cls.for_version(settings.get('version', 1), curve_shape=curve)
+        m = cls.for_version(settings.get('version') or 1, curve_shape=curve)
+        fds_map = {75: 75, '75': 75, 66: 66, '66': 66, None: None, 'none': None}
+        if settings.get('first_deep_stop', '') in fds_map:
+            m.first_deep_stop = fds_map[settings['first_deep_stop']]
+        sds_map = {50: 50, '50': 50, None: None, 'none': None}
+        if settings.get('second_deep_stop', '') in sds_map:
+            m.second_deep_stop = sds_map[settings['second_deep_stop']]
+        o2_map = {(12, 6): (12, 6), '12_6': (12, 6), (10, 5): (10, 5), '10_5': (10, 5)}
+        if settings.get('o2_break_cycle', '') in o2_map:
+            m.o2_break_cycle = o2_map[settings['o2_break_cycle']]
+        return m
 
     def settings(self) -> dict[str, Any]:
-        return {'version': self.version, 'curve_shape': self.curve_shape}
+        return {'curve_shape': self.curve_shape,
+                'first_deep_stop': self.first_deep_stop,
+                'second_deep_stop': self.second_deep_stop,
+                'o2_break_cycle': self.o2_break_cycle}
+
+    def _matching_version(self) -> int | None:
+        """The published version these options correspond to, if any
+        (the curve shape is a free choice and does not count)."""
+        for v, preset in self._VERSION_PRESETS.items():
+            if (self.first_deep_stop == preset['first_deep_stop']
+                    and self.second_deep_stop == preset['second_deep_stop']
+                    and self.o2_break_cycle == preset['o2_break_cycle']):
+                return v
+        return None
 
     def description(self) -> str:
-        return f'Ratio deco {self.version}.0 ({self.curve_shape})'
+        v = self._matching_version()
+        label = f'{v}.0' if v is not None else 'custom'
+        return f'Ratio deco {label} ({self.curve_shape})'
 
     def NDL(self, point: DivePoint, state: Any = None) -> float:
         return max(0, self._NDL(point, state))
 
     def _NDL(self, point: DivePoint, state: Any = None) -> float:
-        """No-decompression limit at this point: how long (minutes) the diver
-        can stay at this depth, on this gas, and still ascend directly to the
-        surface."""
+        """No-decompression limit as of this point: how much longer (minutes)
+        the bottom phase can last and still allow a min-deco ascent."""
+
+        # The NDL belongs to the bottom phase, so it is computed from the
+        # bottom gas: the gas breathed at the deepest point so far. The
+        # point itself may already be past the bottom on another gas (eg
+        # air back at the surface), which would flip the gas multiplier.
+        bottom_points = point._points_before_deco_to_here()
+        bottom_gas = max(bottom_points, key=lambda p: p.depth).gas \
+            if bottom_points else point.gas
 
         #  Are we using Air, Nx32, Tmx30/30, or something else?
-        if point.gas == Gas.Air():
+        if bottom_gas == Gas.Air():
             gas_multiplier = 1
-        elif point.gas == Gas.Nitrox(32):
+        elif bottom_gas == Gas.Nitrox(32):
             gas_multiplier = .8
-        elif point.gas == Gas.Trimix(30, 30):
+        elif bottom_gas == Gas.Trimix(30, 30):
             gas_multiplier = .8
         else:
             return 0

@@ -230,6 +230,24 @@
     }
 
     /*
+     * Ratio deco version presets: set every option to a published version
+     */
+    RD_VERSIONS = {
+        1: {curve: 's_curve_deep',    fds: '75',   sds: '50',   o2cycle: '12_6'},
+        2: {curve: 's_curve_shallow', fds: '66',   sds: '50',   o2cycle: '10_5'},
+        3: {curve: 's_curve_shallow', fds: 'none', sds: 'none', o2cycle: '10_5'}
+    };
+    function set_rd_version(v)
+    {
+        var p = RD_VERSIONS[v];
+        $('#ipt_curve').val(p.curve);
+        $('#ipt_fds').val(p.fds);
+        $('#ipt_sds').val(p.sds);
+        $('#ipt_o2cycle').val(p.o2cycle);
+        reload_all();
+    }
+
+    /*
      * Update link to CSV based on url params
      */
     function set_csv_link() {
@@ -380,13 +398,37 @@
             <label><input type="radio" name="model" value="RatioDeco"
                           {% if is_ratio %}checked{% endif %}
                           onchange="reload_all();"> Ratio deco</label>
+            {% set ms = dive.model_settings() %}
             &nbsp; Ratio curve:
             <select name="curve" id="ipt_curve" onchange="reload_all();">
-                {% set cur_curve = dive.model_settings().get('curve_shape', 's_curve_deep') %}
+                {% set cur_curve = ms.get('curve_shape', 's_curve_deep') %}
                 <option value="s_curve_deep" {% if cur_curve == 's_curve_deep' %}selected{% endif %}>s-curve (deep)</option>
                 <option value="s_curve_shallow" {% if cur_curve == 's_curve_shallow' %}selected{% endif %}>s-curve (shallow)</option>
                 <option value="exponential" {% if cur_curve == 'exponential' %}selected{% endif %}>exponential</option>
             </select>
+            &nbsp; Deep stops:
+            {% set cur_fds = ms.get('first_deep_stop', 75) %}
+            <select name="fds" id="ipt_fds" onchange="reload_all();">
+                <option value="75" {% if cur_fds == 75 %}selected{% endif %}>75%</option>
+                <option value="66" {% if cur_fds == 66 %}selected{% endif %}>66%</option>
+                <option value="none" {% if cur_fds is none %}selected{% endif %}>off</option>
+            </select>
+            +
+            {% set cur_sds = ms.get('second_deep_stop', 50) %}
+            <select name="sds" id="ipt_sds" onchange="reload_all();">
+                <option value="50" {% if cur_sds == 50 %}selected{% endif %}>50%</option>
+                <option value="none" {% if cur_sds is none %}selected{% endif %}>off</option>
+            </select>
+            &nbsp; O<sub>2</sub> breaks:
+            {% set cur_o2 = ms.get('o2_break_cycle', (12, 6)) %}
+            <select name="o2cycle" id="ipt_o2cycle" onchange="reload_all();">
+                <option value="12_6" {% if cur_o2 != (10, 5) %}selected{% endif %}>12/6</option>
+                <option value="10_5" {% if cur_o2 == (10, 5) %}selected{% endif %}>10/5</option>
+            </select>
+            &nbsp;
+            <input type="button" value="RD 1.0" onclick="set_rd_version(1);">
+            <input type="button" value="RD 2.0" onclick="set_rd_version(2);">
+            <input type="button" value="RD 3.0" onclick="set_rd_version(3);">
             &nbsp; Units:
             <select name="units" id="ipt_units" onchange="reload_all();">
                 {% set cur_units = session.get('units', 'metric') %}
