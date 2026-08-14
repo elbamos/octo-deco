@@ -367,7 +367,7 @@ class RatioDeco(DecompressionModel):
             generate_curve = generate_s_curve
 
         def generate_final_stops(duration: int) -> List[Stop]:
-            if self.last_stop_depth == 3:
+            if self.last_stop_depth < 6:
                 return [
                     Stop(6, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2),
                     Stop(3, duration // 2, Gas.best_gas(gases, Util.depth_to_Pamb(3), self.max_pO2_deco), self.ascent_speed / 2)
@@ -467,20 +467,20 @@ class RatioDeco(DecompressionModel):
             n = math.ceil(abs(diff) / 3)
             intervals = n if diff >= 0 else -n
             deco_time += intervals * 5
-            # Half the ratio time at 21-9 m on Nitrox 50, half on O2 at
-            # 6 m; on top of that, half the Nx50 segment's time again in
-            # the 36-24 m range ("Do 1/2 of nitrox 50 time in 120'/36m -
-            # 80'/24m range"). Deep stops only apply above the 36 m
-            # segment, which supersedes the 50%-depth stop.
+            # Half the ratio time at 21-9 m on Nitrox 50, half on O2 in
+            # the final stops (all at 6 m per the source, or split 6/3
+            # when the last stop is 3 m); on top of that, half the Nx50
+            # segment's time again in the 36-24 m range ("Do 1/2 of
+            # nitrox 50 time in 120'/36m - 80'/24m range"). Deep stops
+            # only apply above the 36 m segment, which supersedes the
+            # 50%-depth stop.
             time_21_09 = math.ceil(deco_time / 2) * lost_gas_factor(21)
-            time_o2 = math.ceil(deco_time / 2) * lost_gas_factor(6)
+            time_06_03 = math.ceil(deco_time / 2) * lost_gas_factor(6)
             time_36_24 = math.ceil(time_21_09 / 2)
-            o2_stop = [Stop(6, time_o2,
-                            Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco),
-                            self.ascent_speed)]
             stops = self._insert_gas_switches(
                 generate_deep_stops(36) + generate_curve(36, 24, time_36_24)
-                + generate_curve(21, 9, time_21_09) + o2_stop, bottom_gas)
+                + generate_curve(21, 9, time_21_09)
+                + generate_final_stops(time_06_03), bottom_gas)
             stops = self._apply_O2_breaks(stops, bottom_gas)
             return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
         else:
