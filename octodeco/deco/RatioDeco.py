@@ -51,12 +51,11 @@ class RatioDeco(DecompressionModel):
     MODEL_TYPE = 'RatioDeco'
 
     def __init__(self,
-                 descent_speed: float = 6,
                  curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
                  gas_switch_mins: float = .5,
                  last_stop_depth: float = Literal[6, 3]):
         super().__init__()
-        self.descent_speed = descent_speed
+        self.descent_speed = 20
         # In deco, every 3 m of ascent takes 30 seconds; combined with the
         # standard 30-second stops, each 3 m increment costs one minute.
         self.ascent_speed = 6
