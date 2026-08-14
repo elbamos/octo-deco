@@ -53,7 +53,17 @@ class RatioDeco(DecompressionModel):
     def __init__(self,
                  curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
                  gas_switch_mins: float = .5,
-                 last_stop_depth: Literal[3, 6] = 3):
+                 last_stop_depth: Literal[3, 6] = 3,
+                 first_deep_stop: float | None = 0.75,
+                 second_deep_stop: float | None = 0.5,
+                 s_curve_push: Literal['deep', 'shallow'] = 'deep',
+                 o2_break_cycle: tuple[float, float] = (12, 6)):
+        """The version-dependent options: first_deep_stop / second_deep_stop
+        are the deep-stop depths as fractions of max depth (None = no such
+        stop); s_curve_push says where the time halved off the middle
+        S-curve stops goes ('deep' = the two deepest stops, RD 1.0;
+        'shallow' = the shallowest stop, RD 2.0+); o2_break_cycle is
+        (minutes on O2, minutes on backgas) for long O2 stops."""
         super().__init__()
         self.descent_speed = 20
         # In deco, every 3 m of ascent takes 30 seconds; combined with the
@@ -63,6 +73,40 @@ class RatioDeco(DecompressionModel):
         self.gas_switch_mins = gas_switch_mins
         self.last_stop_depth = last_stop_depth
         self.curve_shape = curve_shape
+        self.first_deep_stop = first_deep_stop
+        self.second_deep_stop = second_deep_stop
+        self.s_curve_push = s_curve_push
+        self.o2_break_cycle = o2_break_cycle
+        self.version = 1
+
+    # The options making up each published version of ratio deco: 2.0
+    # moved the first deep stop from 75% to 66% of depth and pushes the
+    # S-curve's stolen middle time to the shallowest stop; 3.0 drops the
+    # prescribed deep stops entirely. Later materials also cycle O2
+    # breaks at 10 on / 5 off instead of 12 / 6.
+    _VERSION_PRESETS = {
+        1: dict(first_deep_stop=0.75, second_deep_stop=0.5,
+                s_curve_push='deep', o2_break_cycle=(12, 6)),
+        2: dict(first_deep_stop=0.66, second_deep_stop=0.5,
+                s_curve_push='shallow', o2_break_cycle=(10, 5)),
+        3: dict(first_deep_stop=None, second_deep_stop=None,
+                s_curve_push='shallow', o2_break_cycle=(10, 5)),
+    }
+
+    @classmethod
+    def for_version(cls, version: Literal[1, 2, 3],
+                    curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
+                    gas_switch_mins: float = .5,
+                    last_stop_depth: Literal[3, 6] = 3) -> RatioDeco:
+        """A RatioDeco parameterized for Ratio Deco 1.0, 2.0 or 3.0."""
+        if version not in cls._VERSION_PRESETS:
+            raise ValueError(f'unknown ratio deco version {version!r}; expected 1, 2 or 3')
+        instance = cls(curve_shape=curve_shape,
+                       gas_switch_mins=gas_switch_mins,
+                       last_stop_depth=last_stop_depth,
+                       **cls._VERSION_PRESETS[version])
+        instance.version = version
+        return instance
 
     #
     # The DecompressionModel interface
@@ -72,14 +116,15 @@ class RatioDeco(DecompressionModel):
                     settings: dict[str, Any]) -> RatioDeco:
         # Ratio deco is a standardized procedure: it brings its own ascent
         # speeds and stop depths rather than taking them from the dive, so
-        # only the curve shape is configurable.
-        return cls(curve_shape=settings.get('curve_shape', 's-curve'))
+        # only the version and curve shape are configurable.
+        return cls.for_version(settings.get('version', 1),
+                               curve_shape=settings.get('curve_shape', 's-curve'))
 
     def settings(self) -> dict[str, Any]:
-        return {'curve_shape': self.curve_shape}
+        return {'version': self.version, 'curve_shape': self.curve_shape}
 
     def description(self) -> str:
-        return f'Ratio deco ({self.curve_shape})'
+        return f'Ratio deco {self.version}.0 ({self.curve_shape})'
 
     def NDL(self, point: DivePoint, state: Any = None) -> float:
         return max(0, self._NDL(point, state))
@@ -157,11 +202,12 @@ class RatioDeco(DecompressionModel):
         return result
 
     def _apply_O2_breaks(self, stops: List[Stop], back_gas: Gas.Gas) -> List[Stop]:
-        """RD 1.0 oxygen-break cycling: an O2 stop longer than 20 minutes
-        is taken as cycles of 12 minutes on O2 and 6 minutes on backgas;
+        """Oxygen-break cycling: an O2 stop longer than 20 minutes is taken
+        as cycles of o2_break_cycle = (minutes on O2, minutes on backgas);
         the breaks count toward the stop time (a plain 15-20 minute O2
-        stop needs no break)."""
+        stop needs no break). RD 1.0 cycles 12/6, later versions 10/5."""
         o2 = Gas.Nitrox(99)
+        on_max, off_max = self.o2_break_cycle
         result: List[Stop] = []
         for s in stops:
             if s.gas != o2 or s.duration <= 20:
@@ -169,11 +215,11 @@ class RatioDeco(DecompressionModel):
                 continue
             remaining = s.duration
             while remaining > 0:
-                on = min(12, remaining)
+                on = min(on_max, remaining)
                 result.append(Stop(s.depth, on, o2, s.ascent_speed))
                 remaining -= on
                 if remaining > 0:
-                    off = min(6, remaining)
+                    off = min(off_max, remaining)
                     result.append(Stop(s.depth, off, back_gas, s.ascent_speed))
                     remaining -= off
         return result
@@ -243,15 +289,16 @@ class RatioDeco(DecompressionModel):
             return min_stops
 
         def generate_s_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
-            # RD 1.0 S-curve: start from the linear split, halve the two
-            # middle stops (rounding up), push the time taken from them to
-            # the two deepest stops, and let the shallowest stop absorb the
-            # rounding so the segment total stays exact. Matches the worked
-            # examples in the 2005/2008 source material:
-            # 15 min -> 4/4/2/2/3, 24 min -> 7/7/3/3/4.
+            # S-curve: start from the linear split and halve the two middle
+            # stops (rounding up). Where the time taken from them goes is
+            # version-dependent: RD 1.0 pushes it to the two deepest stops
+            # (matching the worked examples in the 2005/2008 material,
+            # eg 15 min -> 4/4/2/2/3), RD 2.0+ to the shallowest stop
+            # (15 min -> 3/3/2/2/5). The last stop absorbs the rounding so
+            # the segment total stays exact.
             base = math.ceil(duration / 5)
-            deep = base + math.floor(base / 2)
             mid = math.ceil(base / 2)
+            deep = base + math.floor(base / 2) if self.s_curve_push == 'deep' else base
             shallow = max(1, duration - 2 * deep - 2 * mid)
             stops = [deep, deep, mid, mid, shallow]
 
@@ -290,22 +337,25 @@ class RatioDeco(DecompressionModel):
                 ]
 
         def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
-            # Durations from the 5thD-X deep-stop table, keyed to exposure
-            # past the NDL (~ bottom time in the ratio zones, where the
-            # table NDL is 0-5 min): per 30-minute block of exposure, the
-            # 75% stop grows 1 minute (1..5) and the 50% stop 2 minutes
-            # (1, 3, 5, 7, 9, capped at 10).
-            blocks = math.floor(point.bottomtime() / 30)
-            duration_75 = min(5, 1 + blocks)
-            duration_50 = min(10, 1 + 2 * blocks)
-
+            # Deep stops at the version's depth fractions (None = version
+            # prescribes none). Durations from the 5thD-X deep-stop table,
+            # keyed to exposure past the NDL (~ bottom time in the ratio
+            # zones, where the table NDL is 0-5 min): per 30-minute block
+            # of exposure, the first stop grows 1 minute (1..5) and the
+            # second 2 minutes (1, 3, 5, 7, 9, capped at 10).
             stops = []
-            first_stop = 3 * math.floor(point.max_depth() * 0.75 / 3 + 0.5)
+            if self.first_deep_stop is None:
+                return stops
+            blocks = math.floor(point.bottomtime() / 30)
+            first_stop = 3 * math.floor(point.max_depth() * self.first_deep_stop / 3 + 0.5)
             if first_stop > gas_switch_depth_m:
-                stops.append(Stop(first_stop, duration_75, point.gas, self.ascent_speed))
-                second_stop = 3 * math.floor(point.max_depth() * 0.5 / 3 + 0.5)
-                if second_stop > gas_switch_depth_m:
-                    stops.append(Stop(second_stop, duration_50, point.gas, self.ascent_speed))
+                stops.append(Stop(first_stop, min(5, 1 + blocks),
+                                  point.gas, self.ascent_speed))
+                if self.second_deep_stop is not None:
+                    second_stop = 3 * math.floor(point.max_depth() * self.second_deep_stop / 3 + 0.5)
+                    if second_stop > gas_switch_depth_m:
+                        stops.append(Stop(second_stop, min(10, 1 + 2 * blocks),
+                                          point.gas, self.ascent_speed))
             return stops
 
         def lost_gas_factor(depth: float) -> int:
