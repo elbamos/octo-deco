@@ -382,8 +382,9 @@
                           onchange="reload_all();"> Ratio deco</label>
             &nbsp; Ratio curve:
             <select name="curve" id="ipt_curve" onchange="reload_all();">
-                {% set cur_curve = dive.model_settings().get('curve_shape', 's-curve') %}
-                <option value="s-curve" {% if cur_curve == 's-curve' %}selected{% endif %}>s-curve</option>
+                {% set cur_curve = dive.model_settings().get('curve_shape', 's_curve_deep') %}
+                <option value="s_curve_deep" {% if cur_curve == 's_curve_deep' %}selected{% endif %}>s-curve (deep)</option>
+                <option value="s_curve_shallow" {% if cur_curve == 's_curve_shallow' %}selected{% endif %}>s-curve (shallow)</option>
                 <option value="exponential" {% if cur_curve == 'exponential' %}selected{% endif %}>exponential</option>
             </select>
             &nbsp; Units:

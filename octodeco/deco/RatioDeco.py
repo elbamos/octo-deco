@@ -50,20 +50,21 @@ class RatioDecoState:
 class RatioDeco(DecompressionModel):
     MODEL_TYPE = 'RatioDeco'
 
+    CurveShape = Literal['exponential', 's_curve_deep', 's_curve_shallow']
+
     def __init__(self,
-                 curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
+                 curve_shape: CurveShape = 's_curve_deep',
                  gas_switch_mins: float = .5,
                  last_stop_depth: Literal[3, 6] = 3,
-                 first_deep_stop: float | None = 0.75,
-                 second_deep_stop: float | None = 0.5,
-                 s_curve_push: Literal['deep', 'shallow'] = 'deep',
-                 o2_break_cycle: tuple[float, float] = (12, 6)):
+                 first_deep_stop: Literal[75, 66] | None = 75,
+                 second_deep_stop: Literal[50] | None = 50,
+                 o2_break_cycle: tuple[Literal[12, 10], Literal[6, 5]] = (12, 6)):
         """The version-dependent options: first_deep_stop / second_deep_stop
-        are the deep-stop depths as fractions of max depth (None = no such
-        stop); s_curve_push says where the time halved off the middle
-        S-curve stops goes ('deep' = the two deepest stops, RD 1.0;
-        'shallow' = the shallowest stop, RD 2.0+); o2_break_cycle is
-        (minutes on O2, minutes on backgas) for long O2 stops."""
+        are the deep-stop depths as percentages of max depth (None = no
+        such stop); curve_shape 's_curve_deep' pushes the time halved off
+        the middle S-curve stops to the two deepest stops (RD 1.0),
+        's_curve_shallow' to the shallowest stop (RD 2.0+); o2_break_cycle
+        is (minutes on O2, minutes on backgas) for long O2 stops."""
         super().__init__()
         self.descent_speed = 20
         # In deco, every 3 m of ascent takes 30 seconds; combined with the
@@ -75,7 +76,6 @@ class RatioDeco(DecompressionModel):
         self.curve_shape = curve_shape
         self.first_deep_stop = first_deep_stop
         self.second_deep_stop = second_deep_stop
-        self.s_curve_push = s_curve_push
         self.o2_break_cycle = o2_break_cycle
         self.version = 1
 
@@ -85,26 +85,29 @@ class RatioDeco(DecompressionModel):
     # prescribed deep stops entirely. Later materials also cycle O2
     # breaks at 10 on / 5 off instead of 12 / 6.
     _VERSION_PRESETS = {
-        1: dict(first_deep_stop=0.75, second_deep_stop=0.5,
-                s_curve_push='deep', o2_break_cycle=(12, 6)),
-        2: dict(first_deep_stop=0.66, second_deep_stop=0.5,
-                s_curve_push='shallow', o2_break_cycle=(10, 5)),
+        1: dict(first_deep_stop=75, second_deep_stop=50,
+                curve_shape='s_curve_deep', o2_break_cycle=(12, 6)),
+        2: dict(first_deep_stop=66, second_deep_stop=50,
+                curve_shape='s_curve_shallow', o2_break_cycle=(10, 5)),
         3: dict(first_deep_stop=None, second_deep_stop=None,
-                s_curve_push='shallow', o2_break_cycle=(10, 5)),
+                curve_shape='s_curve_shallow', o2_break_cycle=(10, 5)),
     }
 
     @classmethod
     def for_version(cls, version: Literal[1, 2, 3],
-                    curve_shape: Literal['s-curve', 'exponential'] = 's-curve',
+                    curve_shape: CurveShape | None = None,
                     gas_switch_mins: float = .5,
                     last_stop_depth: Literal[3, 6] = 3) -> RatioDeco:
-        """A RatioDeco parameterized for Ratio Deco 1.0, 2.0 or 3.0."""
+        """A RatioDeco parameterized for Ratio Deco 1.0, 2.0 or 3.0.
+        curve_shape None means the version's own S-curve flavor."""
         if version not in cls._VERSION_PRESETS:
             raise ValueError(f'unknown ratio deco version {version!r}; expected 1, 2 or 3')
-        instance = cls(curve_shape=curve_shape,
-                       gas_switch_mins=gas_switch_mins,
+        preset = dict(cls._VERSION_PRESETS[version])
+        if curve_shape is not None:
+            preset['curve_shape'] = curve_shape
+        instance = cls(gas_switch_mins=gas_switch_mins,
                        last_stop_depth=last_stop_depth,
-                       **cls._VERSION_PRESETS[version])
+                       **preset)
         instance.version = version
         return instance
 
@@ -116,9 +119,13 @@ class RatioDeco(DecompressionModel):
                     settings: dict[str, Any]) -> RatioDeco:
         # Ratio deco is a standardized procedure: it brings its own ascent
         # speeds and stop depths rather than taking them from the dive, so
-        # only the version and curve shape are configurable.
-        return cls.for_version(settings.get('version', 1),
-                               curve_shape=settings.get('curve_shape', 's-curve'))
+        # only the version and curve shape are configurable. Legacy
+        # settings ('s-curve', or no curve at all) fall back to the
+        # version's own S-curve flavor.
+        curve = settings.get('curve_shape')
+        if curve not in ('exponential', 's_curve_deep', 's_curve_shallow'):
+            curve = None
+        return cls.for_version(settings.get('version', 1), curve_shape=curve)
 
     def settings(self) -> dict[str, Any]:
         return {'version': self.version, 'curve_shape': self.curve_shape}
@@ -298,7 +305,7 @@ class RatioDeco(DecompressionModel):
             # the segment total stays exact.
             base = math.ceil(duration / 5)
             mid = math.ceil(base / 2)
-            deep = base + math.floor(base / 2) if self.s_curve_push == 'deep' else base
+            deep = base + math.floor(base / 2) if self.curve_shape == 's_curve_deep' else base
             shallow = max(1, duration - 2 * deep - 2 * mid)
             stops = [deep, deep, mid, mid, shallow]
 
@@ -320,10 +327,10 @@ class RatioDeco(DecompressionModel):
             return [Stop(depth, duration, Gas.best_gas(gases, Util.depth_to_Pamb(depth), self.max_pO2_deco), self.ascent_speed)
                     for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
 
-        if self.curve_shape == "s-curve":
-            generate_curve = generate_s_curve
-        else:
+        if self.curve_shape == 'exponential':
             generate_curve = generate_expo_curve
+        else:
+            generate_curve = generate_s_curve
 
         def generate_final_stops(duration: int) -> List[Stop]:
             if self.last_stop_depth == 3:
@@ -347,12 +354,12 @@ class RatioDeco(DecompressionModel):
             if self.first_deep_stop is None:
                 return stops
             blocks = math.floor(point.bottomtime() / 30)
-            first_stop = 3 * math.floor(point.max_depth() * self.first_deep_stop / 3 + 0.5)
+            first_stop = 3 * math.floor(point.max_depth() * self.first_deep_stop / 100 / 3 + 0.5)
             if first_stop > gas_switch_depth_m:
                 stops.append(Stop(first_stop, min(5, 1 + blocks),
                                   point.gas, self.ascent_speed))
                 if self.second_deep_stop is not None:
-                    second_stop = 3 * math.floor(point.max_depth() * self.second_deep_stop / 3 + 0.5)
+                    second_stop = 3 * math.floor(point.max_depth() * self.second_deep_stop / 100 / 3 + 0.5)
                     if second_stop > gas_switch_depth_m:
                         stops.append(Stop(second_stop, min(10, 1 + 2 * blocks),
                                           point.gas, self.ascent_speed))

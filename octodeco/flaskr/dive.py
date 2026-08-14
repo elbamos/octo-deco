@@ -48,8 +48,8 @@ def get_gf_args_from_request():
         if model not in ('Buhlmann', 'RatioDeco'):
             model = '';    # '' = the dive's own model
         curve = args.get('curve');
-        if curve not in ('s-curve', 'exponential'):
-            curve = 's-curve';
+        if curve not in ('s_curve_deep', 's_curve_shallow', 'exponential'):
+            curve = '';    # '' = the ratio deco version's own default shape
         # Display units; remembered in the session so the choice sticks
         # across dives and page loads.
         u = args.get('units');
