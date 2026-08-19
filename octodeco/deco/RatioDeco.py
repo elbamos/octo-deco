@@ -264,26 +264,44 @@ class RatioDeco(DecompressionModel):
         return result
 
     def _apply_O2_breaks(self, stops: List[Stop], back_gas: Gas.Gas) -> List[Stop]:
-        """Oxygen-break cycling: an O2 stop longer than 20 minutes is taken
-        as cycles of o2_break_cycle = (minutes on O2, minutes on backgas);
-        the breaks count toward the stop time (a plain 15-20 minute O2
-        stop needs no break). RD 1.0 cycles 12/6, later versions 10/5."""
+        """Oxygen-break cycling: when the continuous time on O2 exceeds 20
+        minutes it is taken as cycles of o2_break_cycle = (minutes on O2,
+        minutes on backgas), the breaks counting toward the stop times.
+        The O2 clock runs across consecutive O2 stops (eg a 6 m and a 3 m
+        stop back to back), not per stop; a run of up to 20 minutes needs
+        no break. RD 1.0 cycles 12/6, later versions 10/5."""
         o2 = Gas.Nitrox(99)
         on_max, off_max = self.o2_break_cycle
         result: List[Stop] = []
-        for s in stops:
-            if s.gas != o2 or s.duration <= 20:
-                result.append(s)
+        i = 0
+        while i < len(stops):
+            if stops[i].gas != o2:
+                result.append(stops[i])
+                i += 1
                 continue
-            remaining = s.duration
-            while remaining > 0:
-                on = min(on_max, remaining)
-                result.append(Stop(s.depth, on, o2, s.ascent_speed))
-                remaining -= on
-                if remaining > 0:
-                    off = min(off_max, remaining)
-                    result.append(Stop(s.depth, off, back_gas, s.ascent_speed))
-                    remaining -= off
+            # The run of consecutive O2 stops starting here
+            j = i
+            while j + 1 < len(stops) and stops[j + 1].gas == o2:
+                j += 1
+            run = stops[i:j + 1]
+            if sum(s.duration for s in run) <= 20:
+                result.extend(run)
+            else:
+                on_left = on_max
+                for s in run:
+                    remaining = s.duration
+                    while remaining > 0:
+                        if on_left <= 0:
+                            off = min(off_max, remaining)
+                            result.append(Stop(s.depth, off, back_gas, s.ascent_speed))
+                            remaining -= off
+                            on_left = on_max
+                        else:
+                            on = min(on_left, remaining)
+                            result.append(Stop(s.depth, on, o2, s.ascent_speed))
+                            remaining -= on
+                            on_left -= on
+            i = j + 1
         return result
 
     def compute_deco_profile(self, point: DivePoint, gases: Iterable[Gas.Gas],
