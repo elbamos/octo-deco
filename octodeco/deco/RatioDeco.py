@@ -1,7 +1,7 @@
 # Please see LICENSE.md
 """Ratio decompression.
 
-Dives to 72 m are supported (1:1 and 1:2 ratios); deeper ratios are not yet
+Dives to 90 m are supported (1:1, 1:2 and 1:3 ratios); deeper ratios are not yet
 implemented.
 
 RatioDeco implements the DecompressionModel interface, so a dive switches to
@@ -377,7 +377,7 @@ class RatioDeco(DecompressionModel):
                     Stop(6, duration, Gas.best_gas(gases, Util.depth_to_Pamb(6), self.max_pO2_deco), self.ascent_speed / 2)
                 ]
 
-        def generate_deep_stops(gas_switch_depth_m: int) -> List[Stop]:
+        def generate_deep_stops(next_segment_depth_m: int) -> List[Stop]:
             # Deep stops at the version's depth fractions (None = version
             # prescribes none). Durations from the 5thD-X deep-stop table,
             # keyed to exposure past the NDL (~ bottom time in the ratio
@@ -389,12 +389,12 @@ class RatioDeco(DecompressionModel):
                 return stops
             blocks = math.floor(point.bottomtime() / 30)
             first_stop = 3 * math.floor(point.max_depth() * self.first_deep_stop / 100 / 3 + 0.5)
-            if first_stop > gas_switch_depth_m:
+            if first_stop > next_segment_depth_m:
                 stops.append(Stop(first_stop, min(5, 1 + blocks),
                                   point.gas, self.ascent_speed))
                 if self.second_deep_stop is not None:
                     second_stop = 3 * math.floor(point.max_depth() * self.second_deep_stop / 100 / 3 + 0.5)
-                    if second_stop > gas_switch_depth_m:
+                    if second_stop > next_segment_depth_m:
                         stops.append(Stop(second_stop, min(10, 1 + 2 * blocks),
                                           point.gas, self.ascent_speed))
             return stops
@@ -483,9 +483,33 @@ class RatioDeco(DecompressionModel):
                 + generate_final_stops(time_06_03), bottom_gas)
             stops = self._apply_O2_breaks(stops, bottom_gas)
             return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
-        else:
-            raise NotImplementedError('ratio deco is not implemented for dives beyond 72 m')
+        elif point.max_depth() <= 90:
+            # Deco at 1:3 ratio
+            if not (bottom_gas == Gas.Trimix(15, 55) or bottom_gas == Gas.Trimix(10, 70)):
+                raise ValueError(f'ratio deco between 72 m and 90 m requires '
+                                 f'bottom gas Tx15/55 or Tx10/70; this dive uses {bottom_gas}')
 
+            deco_time = point.bottomtime() * 3
+            avg_depth_m = point.avg_depth_bottom()
+            diff = avg_depth_m - 81
+            n = math.ceil(abs(diff) / 3)
+            intervals = n if diff >= 0 else -n
+            deco_time += intervals * 5
+            # 40% of ratio time on oxygen, 40% on Nitrox 50, and 20% on 35/25
+            # 35/25 availability is checked at 33 m: at a 36 m stop its
+            # pO2 is 1.61, a hair over the 1.6 limit (120 ft ~ 36.6 m), so
+            # checking at 36 m would spuriously double this segment.
+            time_36_24 = math.ceil(deco_time * .2) * lost_gas_factor(33)
+            time_21_09 = math.ceil(deco_time * .4) * lost_gas_factor(21)
+            time_06_03 = math.ceil(deco_time * .4) * lost_gas_factor(6)
+            stops = self._insert_gas_switches(
+                generate_deep_stops(36) + generate_curve(36, 24, time_36_24)
+                + generate_curve(21, 9, time_21_09)
+                + generate_final_stops(time_06_03), bottom_gas)
+            stops = self._apply_O2_breaks(stops, bottom_gas)
+            return (stops, Util.depth_to_Pamb(stops[0].depth), commit(stops))
+        else:
+            raise NotImplementedError('ratio deco is not implemented for dives beyond 90 m')
 
     def deco_info(self, point: DivePoint, gases_carried: Iterable[Gas.Gas],
                   state: Any = None) -> dict[str, Any]:
