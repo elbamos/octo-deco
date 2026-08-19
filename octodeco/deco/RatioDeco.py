@@ -242,6 +242,27 @@ class RatioDeco(DecompressionModel):
             result.append(s)
         return result
 
+    def _insert_backgas_breaks(self, stops: List[Stop], back_gas: Gas.Gas) -> List[Stop]:
+        """The 1:2/1:3 gas switch protocol: before each switch to the next
+        deco gas, the diver switches back to the bottom gas for the last
+        gas_switch_mins of the current stop (included in the stop's time),
+        rides it through the ascent, and picks up the next gas on arrival
+        at its own stop. Coming off the bottom the diver is already on
+        backgas, so the first switch needs no break."""
+        result: List[Stop] = []
+        for i, s in enumerate(stops):
+            nxt = stops[i + 1] if i + 1 < len(stops) else None
+            if nxt is not None and nxt.gas != s.gas and s.gas != back_gas \
+                    and s.duration > 0:
+                on_gas = s.duration - self.gas_switch_mins
+                if on_gas > 0:
+                    result.append(Stop(s.depth, on_gas, s.gas, s.ascent_speed))
+                result.append(Stop(s.depth, min(s.duration, self.gas_switch_mins),
+                                   back_gas, s.ascent_speed))
+            else:
+                result.append(s)
+        return result
+
     def _apply_O2_breaks(self, stops: List[Stop], back_gas: Gas.Gas) -> List[Stop]:
         """Oxygen-break cycling: an O2 stop longer than 20 minutes is taken
         as cycles of o2_break_cycle = (minutes on O2, minutes on backgas);
@@ -339,36 +360,52 @@ class RatioDeco(DecompressionModel):
             return min_stops
 
         def generate_s_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
-            # S-curve: start from the linear split and halve the two middle
-            # stops (rounding up). Where the time taken from them goes is
+            # S-curve over any number of 3 m stops: start from the linear
+            # split and halve (rounding up) every stop between the two
+            # deepest and the shallowest. Where the taken time goes is
             # version-dependent: RD 1.0 pushes it to the two deepest stops
-            # (matching the worked examples in the 2005/2008 material,
-            # eg 15 min -> 4/4/2/2/3), RD 2.0+ to the shallowest stop
-            # (15 min -> 3/3/2/2/5). The last stop absorbs the rounding so
-            # the segment total stays exact.
-            base = math.ceil(duration / 5)
-            mid = math.ceil(base / 2)
-            deep = base + math.floor(base / 2) if self.curve_shape == 's_curve_deep' else base
-            shallow = max(1, duration - 2 * deep - 2 * mid)
-            stops = [deep, deep, mid, mid, shallow]
+            # (matching the worked 5-stop examples in the 2005/2008
+            # material, eg 15 min -> 4/4/2/2/3), RD 2.0+ to the shallowest
+            # stop (15 min -> 3/3/2/2/5). The last stop absorbs the
+            # rounding so the segment total stays exact.
+            depths = list(range(start_depth, end_depth - 1, -3))
+            n = len(depths)
+            base = math.ceil(duration / n)
+            if n < 3:
+                durations = [base] * (n - 1) + [max(1, duration - base * (n - 1))]
+            else:
+                mid = math.ceil(base / 2)
+                n_mid = n - 3
+                taken = n_mid * (base - mid)
+                if self.curve_shape == 's_curve_deep':
+                    deeps = [base + (taken - taken // 2), base + taken // 2]
+                else:
+                    deeps = [base, base]
+                durations = deeps + [mid] * n_mid \
+                    + [max(1, duration - sum(deeps) - mid * n_mid)]
 
-            return [Stop(depth, duration, stop_gas(depth), self.ascent_speed)
-                    for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
+            return [Stop(depth, d, stop_gas(depth), self.ascent_speed)
+                    for depth, d in zip(depths, durations)]
 
         def generate_expo_curve(start_depth: int, end_depth: int, duration: int) -> List[Stop]:
-            # RD 1.0 exponential shape: each stop longer than the one
-            # before, built by halving time off the two deepest stops and
-            # moving it to the shallow end (eg 15 min -> 1/2/3/4/5).
-            base = math.ceil(duration / 5)
-            second = math.ceil(base / 2)
-            deepest = math.ceil(second / 2)
-            taken = (base - deepest) + (base - second)
-            stops = [deepest, second, base,
-                     base + math.floor(taken / 2),
-                     base + math.ceil(taken / 2)]
+            # RD 1.0 exponential shape over any number of 3 m stops: each
+            # stop no shorter than the one before, built by halving time
+            # off the two deepest stops and moving it to the two
+            # shallowest (eg 15 min over 5 stops -> 1/2/3/4/5).
+            depths = list(range(start_depth, end_depth - 1, -3))
+            n = len(depths)
+            base = math.ceil(duration / n)
+            if n < 4:
+                durations = [base] * (n - 1) + [max(1, duration - base * (n - 1))]
+            else:
+                second = math.ceil(base / 2)
+                deepest = math.ceil(second / 2)
+                taken = (base - deepest) + (base - second)
+                durations = [deepest, second] + [base] * (n - 4) \
+                    + [base + math.floor(taken / 2), base + math.ceil(taken / 2)]
 
-            return [Stop(depth, duration, stop_gas(depth), self.ascent_speed)
-                    for depth, duration in zip(list(range(start_depth, end_depth - 1, -3)), stops)]
+            return [Stop(depth, d, stop_gas(depth), self.ascent_speed)
+                    for depth, d in zip(depths, durations)]
 
         if self.curve_shape == 'exponential':
             generate_curve = generate_expo_curve
@@ -482,10 +519,10 @@ class RatioDeco(DecompressionModel):
             # nitrox 50 time in 120'/36m - 80'/24m range"). Deep stops
             # only apply above the 36 m segment, which supersedes the
             # 50%-depth stop.
+            time_36_24 = math.ceil(deco_time / 4)
             time_21_09 = math.ceil(deco_time / 2) * lost_gas_factor(21)
             time_06_03 = math.ceil(deco_time / 2) * lost_gas_factor(6)
-            time_36_24 = math.ceil(time_21_09 / 2)
-            stops = self._insert_gas_switches(
+            stops = self._insert_backgas_breaks(
                 generate_deep_stops(36) + generate_curve(36, 24, time_36_24)
                 + generate_curve(21, 9, time_21_09)
                 + generate_final_stops(time_06_03), bottom_gas)
@@ -500,12 +537,13 @@ class RatioDeco(DecompressionModel):
             deco_time = calculate_ratio_deco_time(3, 81, point.avg_depth_bottom(), point.bottomtime())
 
             # 40% of ratio time on oxygen, 40% on Nitrox 50, and 20% on 35/25
+            time_57_39 = math.ceil(deco_time * .1)
             time_36_24 = math.ceil(deco_time * .2) * lost_gas_factor(36)
-            time_57_39 = time_36_24
             time_21_09 = math.ceil(deco_time * .4) * lost_gas_factor(21)
             time_06_03 = math.ceil(deco_time * .4) * lost_gas_factor(6)
-            stops = self._insert_gas_switches(
-                generate_deep_stops(36) + generate_curve(36, 24, time_36_24)
+            stops = self._insert_backgas_breaks(
+                generate_deep_stops(57) + generate_curve(57, 39, time_57_39)
+                + generate_curve(36, 24, time_36_24)
                 + generate_curve(21, 9, time_21_09)
                 + generate_final_stops(time_06_03), bottom_gas)
             stops = self._apply_O2_breaks(stops, bottom_gas)
